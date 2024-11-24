@@ -15,7 +15,22 @@ func initService() (*Service, error) {
 	return &Service{}, nil
 }
 
-//encore:api private method=POST path=/purge
+//encore:api auth method=POST path=/sample
+func (s *Service) Sample(ctx context.Context) error {
+	if err := s.Purge(ctx); err != nil {
+		return fmt.Errorf("could not purge data: %w", err)
+	}
+
+	if err := properties.AddProperties(
+		ctx,
+		&properties.Properties{Properties: getSampleProperties()},
+	); err != nil {
+		return fmt.Errorf("could not add sample properties: %w", err)
+	}
+	return nil
+}
+
+//encore:api auth method=DELETE path=/purge
 func (s *Service) Purge(ctx context.Context) error {
 	if err := imolink.Purge(ctx); err != nil {
 		return fmt.Errorf("could not purge imolink: %w", err)
