@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"encore.app/imolink/postgres"
+	"encore.app/internal/pkg/apierror"
 	"encore.app/internal/pkg/httpclient"
 	"encore.app/internal/pkg/openaicli"
 	"encore.dev/pubsub"
@@ -110,14 +111,14 @@ func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
 		Input: in.Question,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("could not create question embedding: %w", err)
+		return nil, apierror.E("could not create question embedding", err)
 	}
 
 	text, _, err := u.repo.FetchNearestNeighbor(ctx, postgres.FetchNearestNeighborInput{
 		Vector: embedd.Data[0].Embedding,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch nearest neighbor: %w", err)
+		return nil, apierror.E("could not fetch nearest neighbor", err)
 	}
 
 	completition, err := u.client.CreateChatCompletition(ctx, openaicli.CompletitionRequest{
@@ -135,7 +136,7 @@ func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("could not create completition: %w", err)
+		return nil, apierror.E("could not create chat completition", err)
 	}
 	return &AskOutput{Answer: completition.Choices[0].Message.Content}, nil
 }
@@ -149,7 +150,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 		Input: in.Data,
 	})
 	if err != nil {
-		return fmt.Errorf("could not create embedding: %w", err)
+		return apierror.E("could not create training embedding", err)
 	}
 
 	if err := u.repo.StoreEmbeddings(ctx, postgres.StoreEmbeddingInput{
@@ -160,7 +161,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 		Vector:    embedd.Data[0].Embedding,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		return fmt.Errorf("could not store embeddings: %w", err)
+		return apierror.E("could not store embeddings", err)
 	}
 	return nil
 }
@@ -168,7 +169,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 //encore:api private method=DELETE path=/embeddings
 func (s *Service) Purge(ctx context.Context) error {
 	if err := s.repo.Purge(ctx); err != nil {
-		return fmt.Errorf("could not purge: %w", err)
+		return apierror.E("could not purge", err)
 	}
 	return nil
 }

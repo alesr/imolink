@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"encore.app/imolink"
+	"encore.app/internal/pkg/apierror"
 	"encore.dev/storage/sqldb"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
@@ -64,7 +65,7 @@ func (s *Service) AddProperties(ctx context.Context, in *Properties) error {
 	}
 
 	if err := group.Wait(); err != nil {
-		fmt.Printf("error while storing and publishing properties: %v", err)
+		return apierror.E("could not add properties", err)
 	}
 	return nil
 }
@@ -85,7 +86,7 @@ func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
 
 	rows, err := db.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("could not query properties: %w", err)
+		return nil, apierror.E("could not fetch properties", err)
 	}
 	defer rows.Close()
 
@@ -112,7 +113,7 @@ func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
 			if errors.Is(err, sqldb.ErrNoRows) {
 				return nil, nil
 			}
-			return nil, fmt.Errorf("could not scan property: %w", err)
+			return nil, apierror.E("could not scan properties", err)
 		}
 
 		p.Address = addr
@@ -228,7 +229,7 @@ func (s *Service) storeProperties(ctx context.Context, p *Property) error {
 //encore:api private method=DELETE path=/properties
 func (s *Service) Purge(ctx context.Context) error {
 	if _, err := db.Exec(ctx, "TRUNCATE properties"); err != nil {
-		return fmt.Errorf("could not purge: %w", err)
+		return fmt.Errorf("could not purge properties: %w", err)
 	}
 	return nil
 }

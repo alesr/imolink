@@ -2,10 +2,16 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"embed"
 
 	"encore.app/imolink"
+	"encore.app/internal/pkg/apierror"
 	"encore.app/properties"
+)
+
+var (
+	//go:embed assets/*
+	assetsFS embed.FS
 )
 
 //encore:service
@@ -17,17 +23,22 @@ func initService() (*Service, error) {
 
 //encore:api auth method=POST path=/sample
 func (s *Service) Sample(ctx context.Context) error {
+	ctx = context.Background() // without cancellation
+
 	if err := s.Purge(ctx); err != nil {
-		return fmt.Errorf("could not purge data: %w", err)
+		return apierror.E("could not purge", err)
 	}
 
-	ctx = context.Background() // without cancellation
+	sampleProps, err := getSampleProperties()
+	if err != nil {
+		return apierror.E("could not get sample properties", err)
+	}
 
 	if err := properties.AddProperties(
 		ctx,
-		&properties.Properties{Properties: getSampleProperties()},
+		&properties.Properties{Properties: sampleProps},
 	); err != nil {
-		return fmt.Errorf("could not add sample properties: %w", err)
+		return apierror.E("could not add sample properties", err)
 	}
 	return nil
 }
@@ -36,10 +47,10 @@ func (s *Service) Sample(ctx context.Context) error {
 func (s *Service) Purge(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
 	if err := imolink.Purge(ctx); err != nil {
-		return fmt.Errorf("could not purge imolink: %w", err)
+		return apierror.E("could not purge imolink", err)
 	}
 	if err := properties.Purge(ctx); err != nil {
-		return fmt.Errorf("could not purge properties: %w", err)
+		return apierror.E("could not purge properties", err)
 	}
 	return nil
 }
