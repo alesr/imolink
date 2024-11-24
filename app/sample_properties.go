@@ -26,7 +26,7 @@ func getSampleProperties() []*properties.Property {
 			},
 			Type: "casa",
 			Info: properties.Info{
-				Reference: "JAR-235",
+				Reference: "REF235",
 				Photo: properties.ImageData{
 					Format:     "jardins-mansion.jpg",
 					Base64Data: "", // Placeholder for actual image data
@@ -62,7 +62,7 @@ func getSampleProperties() []*properties.Property {
 			},
 			Type: "apartamento",
 			Info: properties.Info{
-				Reference: "GRA-1578",
+				Reference: "REF1578",
 				Photo: properties.ImageData{
 					Format:     "lejardin-facade.jpg",
 					Base64Data: "", // Placeholder for actual image data
@@ -98,7 +98,7 @@ func getSampleProperties() []*properties.Property {
 			},
 			Type: "sobrado",
 			Info: properties.Info{
-				Reference: "ATA-963",
+				Reference: "REF-963",
 				Photo: properties.ImageData{
 					Format:     "atalaia-house.jpg",
 					Base64Data: "", // Placeholder for actual image data
@@ -134,7 +134,7 @@ func getSampleProperties() []*properties.Property {
 			},
 			Type: "apartamento",
 			Info: properties.Info{
-				Reference: "FAR-451",
+				Reference: "REF451",
 				Photo: properties.ImageData{
 					Format:     "farol-apto.jpg",
 					Base64Data: "", // Placeholder for actual image data
