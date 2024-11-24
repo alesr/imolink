@@ -21,6 +21,8 @@ func (s *Service) Sample(ctx context.Context) error {
 		return fmt.Errorf("could not purge data: %w", err)
 	}
 
+	ctx = context.Background() // without cancellation
+
 	if err := properties.AddProperties(
 		ctx,
 		&properties.Properties{Properties: getSampleProperties()},
@@ -32,6 +34,7 @@ func (s *Service) Sample(ctx context.Context) error {
 
 //encore:api auth method=DELETE path=/purge
 func (s *Service) Purge(ctx context.Context) error {
+	ctx = context.Background() // without cancellation
 	if err := imolink.Purge(ctx); err != nil {
 		return fmt.Errorf("could not purge imolink: %w", err)
 	}
