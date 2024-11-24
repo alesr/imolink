@@ -40,7 +40,7 @@ type Service struct {
 }
 
 func initService() (*Service, error) {
-	dbLog := walog.Stdout("Database", "DEBUG", true)
+	dbLog := walog.Stdout("whatsapp-database", "INFO", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
 
 	s := new(Service)
@@ -68,7 +68,7 @@ func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	clientLog := walog.Stdout("Client", "DEBUG", true)
+	clientLog := walog.Stdout("whatsapp-client", "INFO", true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 
 	client.AddEventHandler(s.whatsappEventHandler)
