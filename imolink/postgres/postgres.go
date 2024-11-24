@@ -67,7 +67,7 @@ func (p *Postgres) FetchNearestNeighbor(ctx context.Context, in FetchNearestNeig
 }
 
 func (p *Postgres) Purge(ctx context.Context) error {
-	if _, err := p.ExecContext(ctx, "TRUNCATE embeddings"); err != nil {
+	if _, err := p.ExecContext(ctx, "TRUNCATE embeddings CASCADE"); err != nil {
 		return fmt.Errorf("could not purge: %w", err)
 	}
 	return nil
