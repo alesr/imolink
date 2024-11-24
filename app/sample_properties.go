@@ -35,7 +35,6 @@ func getSampleProperties() ([]*properties.Property, error) {
 
 	return []*properties.Property{
 		{
-			ID:             "prop-01",
 			Name:           "Mansão Jardins",
 			Area:           850.50,
 			NumBedrooms:    5,
@@ -51,7 +50,7 @@ func getSampleProperties() ([]*properties.Property, error) {
 			},
 			Type: "casa",
 			Info: properties.Info{
-				Reference: "REF235",
+				Reference: "REF123",
 				Photo: properties.ImageData{
 					Format:     "jardins-mansion.jpg",
 					Base64Data: casaPhoto,
@@ -71,7 +70,6 @@ func getSampleProperties() ([]*properties.Property, error) {
 			UpdatedAt: now,
 		},
 		{
-			ID:             "prop-02",
 			Name:           "Edifício Le Jardin",
 			Area:           245.75,
 			NumBedrooms:    4,
@@ -87,7 +85,7 @@ func getSampleProperties() ([]*properties.Property, error) {
 			},
 			Type: "apartamento",
 			Info: properties.Info{
-				Reference: "REF1578",
+				Reference: "REF345",
 				Photo: properties.ImageData{
 					Format:     "lejardin-facade.jpg",
 					Base64Data: apt1Photo,
@@ -107,7 +105,6 @@ func getSampleProperties() ([]*properties.Property, error) {
 			UpdatedAt: now,
 		},
 		{
-			ID:             "prop-03",
 			Name:           "Residencial Atalaia Sul",
 			Area:           320.30,
 			NumBedrooms:    3,
@@ -123,7 +120,7 @@ func getSampleProperties() ([]*properties.Property, error) {
 			},
 			Type: "sobrado",
 			Info: properties.Info{
-				Reference: "REF-963",
+				Reference: "REF678",
 				Photo: properties.ImageData{
 					Format:     "atalaia-house.jpg",
 					Base64Data: sobradoPhoto,
@@ -143,7 +140,6 @@ func getSampleProperties() ([]*properties.Property, error) {
 			UpdatedAt: now,
 		},
 		{
-			ID:             "prop-04",
 			Name:           "Condomínio Farol da Ilha",
 			Area:           178.45,
 			NumBedrooms:    3,
@@ -159,7 +155,7 @@ func getSampleProperties() ([]*properties.Property, error) {
 			},
 			Type: "apartamento",
 			Info: properties.Info{
-				Reference: "REF451",
+				Reference: "REF901",
 				Photo: properties.ImageData{
 					Format:     "farol-apto.jpg",
 					Base64Data: apt2Photo,
@@ -190,9 +186,9 @@ func getPhotoAndBlueprint(propType string) (string, string, error) {
 	fmt.Println("randNum1)", randNum)
 	switch randNum {
 	case 0:
-		bpFile = "assets/plant1.png"
+		bpFile = "assets/planta1.png"
 	case 1:
-		bpFile = "assets/plant2.png"
+		bpFile = "assets/planta2.png"
 	}
 
 	bpRaw, err := assetsFS.ReadFile(bpFile)
