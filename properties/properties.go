@@ -11,9 +11,10 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/apierror"
+	"encore.app/internal/pkg/idutil"
+
 	"encore.dev/beta/errs"
 	"encore.dev/storage/sqldb"
-	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -48,6 +49,12 @@ func (s *Service) AddProperties(ctx context.Context, in *Properties) error {
 
 	for _, p := range in.Properties {
 		group.Go(func() error {
+			id, err := idutil.NewID()
+			if err != nil {
+				return fmt.Errorf("could not generate ID: %w", err)
+			}
+			p.ID = id
+
 			if err := s.storeProperties(ctx, p); err != nil {
 				return fmt.Errorf("could not store properties: %w", err)
 			}
@@ -204,7 +211,6 @@ func (s *Service) storeProperties(ctx context.Context, p *Property) error {
             $24, $25, $26
         )`
 
-	p.ID = ulid.MustNew(ulid.Now(), nil).String()
 	now := time.Now()
 
 	if p.CreatedAt.IsZero() {

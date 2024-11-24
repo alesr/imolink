@@ -8,12 +8,12 @@ import (
 	"encore.app/imolink/postgres"
 	"encore.app/internal/pkg/apierror"
 	"encore.app/internal/pkg/httpclient"
+	"encore.app/internal/pkg/idutil"
 	"encore.app/internal/pkg/openaicli"
 	"encore.dev/beta/errs"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
 	"github.com/jmoiron/sqlx"
-	"github.com/oklog/ulid/v2"
 )
 
 const (
@@ -154,8 +154,13 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 		return apierror.E("could not create training embedding", err, errs.Internal)
 	}
 
+	id, err := idutil.NewID()
+	if err != nil {
+		return apierror.E("could not generate ID", err, errs.Internal)
+	}
+
 	if err := u.repo.StoreEmbeddings(ctx, postgres.StoreEmbeddingInput{
-		ID:        ulid.MustNew(ulid.Now(), nil).String(),
+		ID:        id,
 		Model:     embbedingModel,
 		Text:      in.Data,
 		Tokens:    int64(embedd.Usage.TotalTokens),
