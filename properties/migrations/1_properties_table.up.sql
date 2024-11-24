@@ -18,7 +18,7 @@ CREATE TABLE properties (
     property_type VARCHAR(50) NOT NULL,
     
     -- Info fields
-    reference VARCHAR(50) NOT NULL,
+    reference VARCHAR(50) NOT NULL UNIQUE,
     description TEXT,
     year_built INTEGER NOT NULL,
     builder VARCHAR(255) NOT NULL,
@@ -37,3 +37,5 @@ CREATE TABLE properties (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_properties_reference ON properties (reference);
