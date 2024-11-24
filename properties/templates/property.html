@@ -1,0 +1,210 @@
+{{define "property"}}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Name}} - Detalhes do Imóvel</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --background-color: #f5f6fa;
+            --text-color: #2c3e50;
+            --border-radius: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+        }
+
+        header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        section {
+            background: white;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border-radius: var(--border-radius);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+            border-bottom: 2px solid var(--secondary-color);
+            padding-bottom: 0.5rem;
+        }
+
+        ul {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        li {
+            padding: 0.5rem;
+            background-color: var(--background-color);
+            border-radius: var(--border-radius);
+        }
+
+        address {
+            font-style: normal;
+            background-color: var(--background-color);
+            padding: 1rem;
+            border-radius: var(--border-radius);
+        }
+
+        .image-container {
+            position: relative;
+            margin: 1rem 0;
+        }
+
+        .image-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: var(--border-radius);
+        }
+
+        .image-info {
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-color);
+            opacity: 0.8;
+        }
+
+        .features ul {
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .features li {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .features li::before {
+            content: "•";
+            color: var(--secondary-color);
+        }
+
+        .price {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var (--secondary-color);
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            background-color: var(--primary-color);
+            color: white;
+            margin-top: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            ul {
+                grid-template-columns: 1fr;
+            }
+            
+            section {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>{{.Name}}</h1>
+        <p>Referência: {{.Info.Reference}}</p>
+    </header>
+
+    <main>
+        <section>
+            <h2>Informações Básicas</h2>
+            <ul>
+                <li class="price">R$ {{printf "%.2f" .Price}}</li>
+                <li>Área: {{.Area}} m²</li>
+                <li>Quartos: {{.NumBedrooms}}</li>
+                <li>Banheiros: {{.NumBathrooms}}</li>
+                <li>Vagas de Garagem: {{.NumGarageSpots}}</li>
+                <li>Tipo do Imóvel: {{.Type}}</li>
+                <li>Ano de Construção: {{.Info.YearBuilt}}</li>
+                <li>Construtora: {{.Info.Builder}}</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Localização</h2>
+            <address>
+                {{.Address.Street}}, {{.Address.Number}}<br>
+                {{.Address.District}}<br>
+                {{.Address.City}}, {{.Address.State}}
+            </address>
+        </section>
+
+        {{if .Info.Description}}
+        <section>
+            <h2>Descrição</h2>
+            <p>{{.Info.Description}}</p>
+        </section>
+        {{end}}
+
+        {{if .Info.Features}}
+        <section class="features">
+            <h2>Características</h2>
+            <ul>
+                {{range .Info.Features}}
+                <li>{{.}}</li>
+                {{end}}
+            </ul>
+        </section>
+        {{end}}
+
+        {{if .Info.Photo.Base64Data}}
+        <section>
+            <h2>Fotos</h2>
+            <div class="image-container">
+                <img src="data:image/png;base64,{{.Info.Photo.Base64Data}}" alt="Foto do imóvel">
+            </div>
+        </section>
+        {{end}}
+
+        {{if .Info.Blueprint.Base64Data}}
+        <section>
+            <h2>Planta</h2>
+            <div class="image-container">
+                <img src="data:image/png;base64,{{.Info.Blueprint.Base64Data}}" alt="Planta do imóvel">
+            </div>
+        </section>
+        {{end}}
+    </main>
+
+    <footer>
+        {{if .ID}}
+        <p>ID do Imóvel: {{.ID}}</p>
+        {{end}}
+    </footer>
+</body>
+</html>
+{{end}}
