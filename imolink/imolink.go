@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"encore.app/imolink/postgres"
+	"encore.app/internal/pkg/httpclient"
 	"encore.app/internal/pkg/openaicli"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
-	"github.com/alesr/httpclient"
 	"github.com/jmoiron/sqlx"
 	"github.com/oklog/ulid/v2"
 )
