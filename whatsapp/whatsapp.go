@@ -82,7 +82,7 @@ func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
 	return nil
 }
 
-//encore:api public raw path=/whatsapp/connect
+//encore:api auth raw path=/whatsapp/connect
 func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
