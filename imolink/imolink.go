@@ -9,6 +9,7 @@ import (
 	"encore.app/internal/pkg/apierror"
 	"encore.app/internal/pkg/httpclient"
 	"encore.app/internal/pkg/openaicli"
+	"encore.dev/beta/errs"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
 	"github.com/jmoiron/sqlx"
@@ -111,14 +112,14 @@ func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
 		Input: in.Question,
 	})
 	if err != nil {
-		return nil, apierror.E("could not create question embedding", err)
+		return nil, apierror.E("could not create question embedding", err, errs.Internal)
 	}
 
 	text, _, err := u.repo.FetchNearestNeighbor(ctx, postgres.FetchNearestNeighborInput{
 		Vector: embedd.Data[0].Embedding,
 	})
 	if err != nil {
-		return nil, apierror.E("could not fetch nearest neighbor", err)
+		return nil, apierror.E("could not fetch nearest neighbor", err, errs.Internal)
 	}
 
 	completition, err := u.client.CreateChatCompletition(ctx, openaicli.CompletitionRequest{
@@ -136,7 +137,7 @@ func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
 		},
 	})
 	if err != nil {
-		return nil, apierror.E("could not create chat completition", err)
+		return nil, apierror.E("could not create chat completition", err, errs.Internal)
 	}
 	return &AskOutput{Answer: completition.Choices[0].Message.Content}, nil
 }
@@ -150,7 +151,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 		Input: in.Data,
 	})
 	if err != nil {
-		return apierror.E("could not create training embedding", err)
+		return apierror.E("could not create training embedding", err, errs.Internal)
 	}
 
 	if err := u.repo.StoreEmbeddings(ctx, postgres.StoreEmbeddingInput{
@@ -161,7 +162,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 		Vector:    embedd.Data[0].Embedding,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		return apierror.E("could not store embeddings", err)
+		return apierror.E("could not store embeddings", err, errs.Internal)
 	}
 	return nil
 }
@@ -169,7 +170,7 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 //encore:api private method=DELETE path=/embeddings
 func (s *Service) Purge(ctx context.Context) error {
 	if err := s.repo.Purge(ctx); err != nil {
-		return apierror.E("could not purge", err)
+		return apierror.E("could not purge", err, errs.Internal)
 	}
 	return nil
 }

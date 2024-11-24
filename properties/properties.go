@@ -11,6 +11,7 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/apierror"
+	"encore.dev/beta/errs"
 	"encore.dev/storage/sqldb"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
@@ -65,7 +66,7 @@ func (s *Service) AddProperties(ctx context.Context, in *Properties) error {
 	}
 
 	if err := group.Wait(); err != nil {
-		return apierror.E("could not add properties", err)
+		return apierror.E("could not add properties", err, errs.Internal)
 	}
 	return nil
 }
@@ -86,7 +87,7 @@ func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
 
 	rows, err := db.Query(ctx, query)
 	if err != nil {
-		return nil, apierror.E("could not fetch properties", err)
+		return nil, apierror.E("could not fetch properties", err, errs.Internal)
 	}
 	defer rows.Close()
 
@@ -113,7 +114,7 @@ func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
 			if errors.Is(err, sqldb.ErrNoRows) {
 				return nil, nil
 			}
-			return nil, apierror.E("could not scan properties", err)
+			return nil, apierror.E("could not scan properties", err, errs.Internal)
 		}
 
 		p.Address = addr

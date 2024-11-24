@@ -7,6 +7,7 @@ import (
 	"encore.app/imolink"
 	"encore.app/internal/pkg/apierror"
 	"encore.app/properties"
+	"encore.dev/beta/errs"
 )
 
 var (
@@ -26,19 +27,19 @@ func (s *Service) Sample(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
 
 	if err := s.Purge(ctx); err != nil {
-		return apierror.E("could not purge", err)
+		return apierror.E("could not purge", err, errs.Internal)
 	}
 
 	sampleProps, err := getSampleProperties()
 	if err != nil {
-		return apierror.E("could not get sample properties", err)
+		return apierror.E("could not get sample properties", err, errs.Internal)
 	}
 
 	if err := properties.AddProperties(
 		ctx,
 		&properties.Properties{Properties: sampleProps},
 	); err != nil {
-		return apierror.E("could not add sample properties", err)
+		return apierror.E("could not add sample properties", err, errs.Internal)
 	}
 	return nil
 }
@@ -47,10 +48,10 @@ func (s *Service) Sample(ctx context.Context) error {
 func (s *Service) Purge(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
 	if err := imolink.Purge(ctx); err != nil {
-		return apierror.E("could not purge imolink", err)
+		return apierror.E("could not purge imolink", err, errs.Internal)
 	}
 	if err := properties.Purge(ctx); err != nil {
-		return apierror.E("could not purge properties", err)
+		return apierror.E("could not purge properties", err, errs.Internal)
 	}
 	return nil
 }

@@ -5,13 +5,13 @@ import (
 	"encore.dev/rlog"
 )
 
-func E(msg string, e error) error {
+func E(msg string, e error, code errs.ErrCode) error {
 	if e == nil {
 		return nil
 	}
 	rlog.Error(msg, "error", e)
 	return &errs.Error{
-		Code:    errs.Internal,
+		Code:    code,
 		Message: msg,
 	}
 }
