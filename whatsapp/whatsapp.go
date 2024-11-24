@@ -248,7 +248,7 @@ func extractPropertyRef(message string) string {
 				parts := strings.Split(ref, ":")
 				ref = strings.TrimSpace(parts[len(parts)-1])
 			}
-			return strings.Trim(ref, "REF")
+			return ref
 		}
 	}
 	return ""
