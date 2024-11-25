@@ -6,54 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Name}} - Detalhes do Imóvel</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: {"50":"#f8fafc","100":"#f1f5f9","200":"#e2e8f0","300":"#cbd5e1","400":"#94a3b8","500":"#64748b","600":"#475569","700":"#334155","800":"#1e293b","900":"#0f172a","950":"#020617"}
-                    }
-                },
-                fontFamily: {
-                    'sans': ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system'],
-                }
-            }
-        }
-    </script>
 </head>
 <body class="bg-gray-100">
-    <!-- Top Bar -->
-    <div class="bg-black text-white py-3 px-4 text-center text-sm">
-        <p>Quer agendar uma visita? <a href="#" class="underline">Clique aqui</a> ou clique no botão "Gostei desse imóvel"</p>
-    </div>
-
     <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
         <!-- Property Header -->
         <div class="flex flex-col lg:flex-row gap-8 mb-8">
             <!-- Main Image -->
+            {{if .PhotoBase64Data}}
             <div class="lg:w-2/3">
                 <div class="relative rounded-2xl overflow-hidden">
                     <div class="absolute top-4 left-4 z-10">
                         <span class="bg-white/90 backdrop-blur-sm text-gray-700 px-4 py-1 rounded-full text-sm font-medium">
-                            {{.Address.District}}, {{.Address.City}}
+                            {{.District}}, {{.City}}
                         </span>
                     </div>
-                    <div class="absolute top-4 right-4 z-10">
-                        <span class="bg-green-500/90 backdrop-blur-sm text-white px-4 py-1 rounded-full text-sm font-medium">
-                            Em construção
-                        </span>
-                    </div>
-                    <img src="data:image/png;base64,{{.Info.Photo.Base64Data}}" 
+                    <img src="data:{{.PhotoFormat}};base64,{{.PhotoBase64Data}}" 
                          class="w-full h-[500px] object-cover"
                          alt="{{.Name}}">
                 </div>
             </div>
+            {{end}}
 
             <!-- Property Info -->
             <div class="lg:w-1/3 space-y-6">
                 <div>
                     <h1 class="text-3xl font-bold text-gray-900">{{.Name}}</h1>
-                    <p class="mt-2 text-gray-600">{{.Info.Description}}</p>
+                    {{if .Description}}
+                    <p class="mt-2 text-gray-600">{{.Description}}</p>
+                    {{end}}
                 </div>
 
                 <!-- Characteristics -->
@@ -72,45 +52,18 @@
                         <div class="flex items-center gap-2">
                             <span class="text-gray-600">{{.NumGarageSpots}} vagas</span>
                         </div>
-                        {{if .Info.Features}}
-                        {{range .Info.Features}}
+                        {{range .Features}}
                         <div class="flex items-center gap-2">
                             <span class="text-gray-600">{{.}}</span>
                         </div>
                         {{end}}
-                        {{end}}
                     </div>
                 </div>
 
-                <!-- Simulation Form -->
+                <!-- Price -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm">
-                    <h2 class="text-xl font-semibold mb-4">Faça uma simulação</h2>
-                    <form class="space-y-4">
-                        <div class="space-y-2">
-                            <label class="flex items-center gap-2">
-                                <input type="radio" name="simulationType" checked>
-                                <span>Simular por renda</span>
-                            </label>
-                            <label class="flex items-center gap-2">
-                                <input type="radio" name="simulationType">
-                                <span>Simular por Parcelas</span>
-                            </label>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Renda Familiar Mensal</label>
-                            <div class="mt-1 relative rounded-md shadow-sm">
-                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <span class="text-gray-500 sm:text-sm">R$</span>
-                                </div>
-                                <input type="text" class="block w-full pl-10 pr-12 sm:text-sm border-gray-300 rounded-md" placeholder="0,00">
-                            </div>
-                        </div>
-
-                        <button type="submit" class="w-full bg-black text-white py-3 rounded-md hover:bg-gray-800 transition-colors">
-                            Simular
-                        </button>
-                    </form>
+                    <h2 class="text-xl font-semibold mb-4">Valor</h2>
+                    <p class="text-2xl font-bold">R$ {{printf "%.2f" .Price}}</p>
                 </div>
             </div>
         </div>
@@ -120,66 +73,25 @@
             <h2 class="text-xl font-semibold mb-4">Localização</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <p class="text-gray-600">Cidade:</p>
-                    <p class="font-medium">{{.Address.City}}</p>
-                </div>
-                <div>
-                    <p class="text-gray-600">Bairro:</p>
-                    <p class="font-medium">{{.Address.District}}</p>
-                </div>
-                <div>
                     <p class="text-gray-600">Endereço:</p>
-                    <p class="font-medium">{{.Address.Street}}, {{.Address.Number}}</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Details -->
-        <section class="bg-white rounded-2xl shadow-sm p-6 mb-8">
-            <h2 class="text-xl font-semibold mb-4">Detalhes</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                    <p class="text-gray-600">ID:</p>
-                    <p class="font-medium">{{.ID}}</p>
-                </div>
-                <div>
-                    <p class="text-gray-600">Entrega:</p>
-                    <p class="font-medium">{{.Info.YearBuilt}}</p>
-                </div>
-                <div>
-                    <p class="text-gray-600">Preço:</p>
-                    <p class="font-medium">R$ {{printf "%.2f" .Price}}</p>
-                </div>
-                <div>
-                    <p class="text-gray-600">Tamanho:</p>
-                    <p class="font-medium">{{.Area}} m²</p>
+                    <p class="font-medium">{{.Street}}, {{.Number}} - {{.District}}</p>
+                    <p class="font-medium">{{.City}}/{{.State}}</p>
                 </div>
             </div>
         </section>
 
         <!-- Blueprint -->
-        {{if .Info.Blueprint.Base64Data}}
+        {{if .BlueprintBase64Data}}
         <section class="mb-8">
             <h2 class="text-2xl font-semibold mb-6">Planta do Imóvel</h2>
             <div class="bg-white p-6 rounded-2xl shadow-sm">
-                <img src="data:image/png;base64,{{.Info.Blueprint.Base64Data}}" 
+                <img src="data:{{.BlueprintFormat}};base64,{{.BlueprintBase64Data}}" 
                      class="w-full h-auto rounded-lg"
                      alt="Planta do imóvel">
             </div>
         </section>
         {{end}}
     </main>
-
-    <!-- Footer CTA -->
-    <div class="bg-gray-900 text-white py-12">
-        <div class="max-w-7xl mx-auto px-4 text-center">
-            <h2 class="text-2xl font-semibold mb-4">Gostou desse imóvel?</h2>
-            <p class="mb-6">Clique no botão para conversar com um corretor</p>
-            <button class="bg-white text-gray-900 px-8 py-3 rounded-md font-medium hover:bg-gray-100 transition-colors">
-                Falar com um corretor
-            </button>
-        </div>
-    </div>
 </body>
 </html>
 {{end}}

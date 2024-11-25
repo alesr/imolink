@@ -1,79 +1,31 @@
 package imolink
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
+	"sync"
 	"time"
 
-	"encore.app/imolink/postgres"
+	"encore.app/imolink/formatter"
 	"encore.app/internal/pkg/apierror"
 	"encore.app/internal/pkg/httpclient"
-	"encore.app/internal/pkg/idutil"
 	"encore.app/internal/pkg/openaicli"
+	"encore.app/internal/pkg/openaicli/types"
+	"encore.app/properties"
 	"encore.dev/beta/errs"
+	"encore.dev/metrics"
 	"encore.dev/pubsub"
-	"encore.dev/storage/sqldb"
-	"github.com/jmoiron/sqlx"
-)
-
-const (
-	embbedingModel  = "text-embedding-3-small"
-	completionModel = "gpt-4o-mini"
 )
 
 var (
-	db = sqldb.NewDatabase("imolink", sqldb.DatabaseConfig{
-		Migrations: "./migrations",
-	})
+	// Encore metric collectors
+	QuestionsProcessed = metrics.NewCounter[uint64]("questions_processed", metrics.CounterConfig{})
+	DataTrained        = metrics.NewCounter[uint64]("data_trained", metrics.CounterConfig{})
 
-	secrets struct {
-		OpenAIKey string
-	}
-
-	systemCompletionMsg = openaicli.Message{
-		Role: "system",
-		Content: `Você é um corretor de imóveis profissional e experiente no mercado imobiliário brasileiro. Seu objetivo é ajudar os clientes a encontrarem o imóvel ideal para suas necessidades.
-
-Diretrizes de comportamento:
-- Comunique-se sempre em português brasileiro formal, mas mantenha um tom acolhedor e profissional
-- Faça perguntas pertinentes para entender melhor as necessidades do cliente, mas apenas pergunte se for necessário para fornecer uma resposta melhor.
-- Evite suposições sobre as preferências do cliente sem ter informações suficientes.
-- Seja direto e objetivo nas resposta sempre que houver informações claras disponíveis, evite prolongar a conversa com adicionais perguntas.
-
-Regras de resposta:
-1. Quando não houver informações suficientes sobre um imóvel ou característica solicitada, admita que não possui essa informação específica
-2. Ao apresentar opções de imóveis:
-   - Se houver múltiplos imóveis compatíveis, apresente apenas o mais adequado às necessidades do cliente
-   - Forneça uma justificativa sucinta do por que esse imóvel foi selecionado
-3. Formato de apresentação do imóvel:
-   - Breve descrição do imóvel.
-
-Exemplo de estrutura de resposta com imóvel:
-\"[Saudação e contextualização]
-
-*Propriedade:*
-Sucinta descrição do imóvel em prosa e comentário sobre adequação do imóvel.
-
-*ID da Propriedade:* REF123\"`,
-	}
-)
-
-type (
-	repository interface {
-		FetchNearestNeighbor(ctx context.Context, in postgres.FetchNearestNeighborInput) (string, float64, error)
-		StoreEmbeddings(ctx context.Context, in postgres.StoreEmbeddingInput) error
-		Purge(ctx context.Context) error
-	}
-
-	openAIClient interface {
-		CreateEmbedding(ctx context.Context, in openaicli.EmbbedingRequest) (*openaicli.EmbeddingResponse, error)
-		CreateChatCompletition(ctx context.Context, in openaicli.CompletitionRequest) (*openaicli.CompletitionResponse, error)
-	}
-
-	NewPropertyEvent struct{ Data string }
-)
-
-var (
 	NewPropertiesTopic = pubsub.NewTopic[*NewPropertyEvent]("new-property", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
@@ -85,105 +37,144 @@ var (
 			Handler: train,
 		},
 	)
+
+	secrets struct {
+		OpenAIKey string
+	}
+)
+
+const (
+	defaultTimeout     = 180 * time.Second
+	defaultDialTimeout = 30 * time.Second
+	defaultTLSTimeout  = 20 * time.Second
+	defaultKeepAlive   = 90 * time.Second
+)
+
+var (
+	Assistant *types.Assistant
+)
+
+type (
+	openAIClient interface {
+		CreateAssistant(ctx context.Context, cfg types.AssistantCfg) (*types.Assistant, error)
+		NewThread(ctx context.Context) (*types.Thread, error)
+		UploadFile(ctx context.Context, data io.Reader, purpose string) (*types.FileUploadResponse, error)
+		AddMessage(ctx context.Context, in types.CreateMessageInput) error
+		RunThread(ctx context.Context, threadID, assistantID string) (*types.Run, error)
+		GetMessages(ctx context.Context, threadID string) (*types.ThreadMessageList, error)
+		AttachFileToAssistant(ctx context.Context, assistantID, fileID string) error
+	}
+
+	NewPropertyEvent struct{ Data string }
+
+	QuestionsInput    struct{ Input []QuestionInput }
+	QuestionInput     struct{ Role, Question string }
+	QuestionOutput    struct{ Answer string }
+	TrainingDataInput struct{ Data []string }
 )
 
 //encore:service
 type Service struct {
-	repo   repository
 	client openAIClient
+	mu     sync.RWMutex // to protect assistant updates
 }
 
 func initService() (*Service, error) {
 	return &Service{
-		repo: postgres.NewPostgres(
-			sqlx.NewDb(db.Stdlib(), "postgres"),
+		client: openaicli.New(
+			secrets.OpenAIKey,
+			httpclient.New(
+				httpclient.WithTimeout(defaultTimeout),
+			),
 		),
-		client: openaicli.New(secrets.OpenAIKey, httpclient.New()),
 	}, nil
 }
 
-type (
-	QuestionInput  struct{ Question string }
-	QuestionOutput struct{ Answer string }
-)
-
-//encore:api private method=POST path=/imolink/question
-func (u *Service) AskQuestion(ctx context.Context, in QuestionInput) (*QuestionOutput, error) {
-	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
-		Model: embbedingModel,
-		Input: in.Question,
-	})
+//encore:api public method=POST path=/imolink/init-assistant
+func (s *Service) InitializeAssistant(ctx context.Context) error {
+	assistant, err := s.initializeAssistantWithProperties(ctx)
 	if err != nil {
-		return nil, apierror.E("could not create question embedding", err, errs.Internal)
+		return apierror.E("failed to initialize assistant", err, errs.Internal)
 	}
 
-	text, _, err := u.repo.FetchNearestNeighbor(ctx, postgres.FetchNearestNeighborInput{
-		Vector: embedd.Data[0].Embedding,
-	})
-	if err != nil {
-		return nil, apierror.E("could not fetch nearest neighbor", err, errs.Internal)
-	}
-
-	completition, err := u.client.CreateChatCompletition(ctx, openaicli.CompletitionRequest{
-		Model: completionModel,
-		Messages: []openaicli.Message{
-			systemCompletionMsg,
-			{
-				Role:    "system",
-				Content: text,
-			},
-			{
-				Role:    "user",
-				Content: in.Question,
-			},
-		},
-	})
-	if err != nil {
-		return nil, apierror.E("could not create chat completition", err, errs.Internal)
-	}
-	return &QuestionOutput{Answer: completition.Choices[0].Message.Content}, nil
-}
-
-type TrainingDataInput struct{ Data string }
-
-//encore:api private method=POST path=/imolink/training-data
-func (u *Service) AddTrainingData(ctx context.Context, in TrainingDataInput) error {
-	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
-		Model: embbedingModel,
-		Input: in.Data,
-	})
-	if err != nil {
-		return apierror.E("could not create training embedding", err, errs.Internal)
-	}
-
-	id, err := idutil.NewID()
-	if err != nil {
-		return apierror.E("could not generate ID", err, errs.Internal)
-	}
-
-	if err := u.repo.StoreEmbeddings(ctx, postgres.StoreEmbeddingInput{
-		ID:        id,
-		Model:     embbedingModel,
-		Text:      in.Data,
-		Tokens:    int64(embedd.Usage.TotalTokens),
-		Vector:    embedd.Data[0].Embedding,
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		return apierror.E("could not store embeddings", err, errs.Internal)
-	}
+	s.mu.Lock()
+	Assistant = assistant
+	s.mu.Unlock()
 	return nil
 }
 
-//encore:api private method=DELETE path=/imolink/training-data
-func (s *Service) RemoveTrainingData(ctx context.Context) error {
-	if err := s.repo.Purge(ctx); err != nil {
-		return apierror.E("could not purge", err, errs.Internal)
+func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types.Assistant, error) {
+	props, err := properties.List(ctx, properties.ListInput{})
+	if err != nil {
+		return nil, fmt.Errorf("could not list properties: %w", err)
 	}
+
+	if len(props.Properties) == 0 {
+		return nil, fmt.Errorf("no properties available in the database")
+	}
+
+	data := formatter.FormatProperties(props.Properties)
+
+	fileResp, err := s.client.UploadFile(ctx, strings.NewReader(data), "assistants")
+	if err != nil {
+		return nil, fmt.Errorf("could not upload properties data: %w", err)
+	}
+
+	assist, err := s.client.CreateAssistant(ctx, types.AssistantCfg{
+		Name:         "ImoLink",
+		Description:  "Assistente especializado em imóveis em Aracaju",
+		Model:        types.AssistantModel,
+		Instructions: assistantInstructions,
+		Tools: []types.Tool{
+			{Type: types.ToolTypeFileSearch},
+			{Type: types.ToolTypeCodeInterpreter},
+		},
+		Metadata: types.Meta{
+			"type":    "real_estate_assistant",
+			"region":  "Aracaju",
+			"version": "1.0",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not create assistant: %w", err)
+	}
+
+	if err := s.client.AttachFileToAssistant(ctx, assist.ID, fileResp.ID); err != nil {
+		return nil, fmt.Errorf("could not attach file to assistant: %w", err)
+	}
+	return assist, nil
+}
+
+//encore:api public method=POST path=/imolink/training-data
+func (s *Service) AddTrainingData(ctx context.Context, in TrainingDataInput) error {
+	s.mu.RLock()
+	assistant := Assistant
+	s.mu.RUnlock()
+
+	if assistant == nil {
+		return apierror.E("assistant not initialized", nil, errs.Internal)
+	}
+
+	jsonData, err := json.Marshal(in.Data)
+	if err != nil {
+		return apierror.E("invalid json string", err, errs.InvalidArgument)
+	}
+
+	resp, err := s.client.UploadFile(ctx, bytes.NewReader(jsonData), "assistants")
+	if err != nil {
+		return apierror.E("could not upload file", err, errs.Internal)
+	}
+
+	if err := s.client.AttachFileToAssistant(ctx, assistant.ID, resp.ID); err != nil {
+		return apierror.E("could not attach file to assistant", err, errs.Internal)
+	}
+
+	DataTrained.Increment()
 	return nil
 }
 
 func train(ctx context.Context, q *NewPropertyEvent) error {
-	if err := AddTrainingData(ctx, TrainingDataInput{Data: q.Data}); err != nil {
+	if err := AddTrainingData(ctx, TrainingDataInput{Data: []string{q.Data}}); err != nil {
 		return fmt.Errorf("could not ask: %w", err)
 	}
 	return nil

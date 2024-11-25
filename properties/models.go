@@ -74,13 +74,3 @@ func (a *Address) String() string {
 		a.Street, a.Number, a.District, a.City, a.State,
 	)
 }
-
-// Question represents a question for the application
-type Question struct {
-	Question string `json:"question"`
-}
-
-// Response represents an application response
-type Response struct {
-	Message string `json:"message"`
-}

@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"encore.app/imolink"
-	"encore.dev"
+	"encore.app/internal/pkg/openaicli"
+	"encore.dev/metrics"
 	"encore.dev/rlog"
 	"encore.dev/storage/sqldb"
 	"github.com/mdp/qrterminal/v3"
@@ -19,8 +19,15 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	walog "go.mau.fi/whatsmeow/util/log"
+)
+
+const (
+	maxInitRetries = 3
+	initRetryDelay = 2 * time.Second
+	messageTimeout = 2 * time.Minute
 )
 
 var (
@@ -28,24 +35,42 @@ var (
 		Migrations: "./migrations",
 	})
 
+	MessagesReceived = metrics.NewCounter[uint64]("messages_received", metrics.CounterConfig{})
+	MessagesSent     = metrics.NewCounter[uint64]("messages_sent", metrics.CounterConfig{})
+
 	secrets struct {
 		OpenAIKey string
 	}
 )
 
+// Service is the main service for the WhatsApp API.
+//
 //encore:service
 type Service struct {
-	whatsappCli    *whatsmeow.Client
-	deviceStore    *store.Device
-	clientLock     sync.Mutex
-	reconnectTimer *time.Timer
+	whatsappCli *whatsmeow.Client
+	deviceStore *store.Device
+	clientLock  sync.Mutex
+	sessionMgr  *openaicli.SessionManager
 }
 
 func initService() (*Service, error) {
+	s := new(Service)
+
+	if err := imolink.InitializeAssistant(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
+	}
+
+	openaiCli := openaicli.New(secrets.OpenAIKey, &http.Client{
+		Timeout: 30 * time.Second,
+	})
+
+	s.sessionMgr = openaicli.NewSessionManager(
+		imolink.Assistant,
+		openaiCli,
+	)
+
 	dbLog := walog.Stdout("whatsapp-database", "INFO", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
-
-	s := &Service{}
 
 	deviceStore, err := container.GetFirstDevice()
 	if err != nil {
@@ -57,110 +82,14 @@ func initService() (*Service, error) {
 
 	if deviceStore != nil {
 		if err := s.connectToWhatsApp(deviceStore); err != nil {
-			rlog.Error("Failed to connect to WhatsApp during init", "error", err)
-			// Don't return error here - we'll attempt reconnection
+			return nil, fmt.Errorf("failed to reconnect to WhatsApp: %w", err)
 		}
-		s.startConnectionMonitor()
 	}
-
 	s.deviceStore = deviceStore
 	return s, nil
 }
 
-func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
-	s.clientLock.Lock()
-	defer s.clientLock.Unlock()
-
-	// If we already have a connected client, disconnect it first
-	if s.whatsappCli != nil {
-		s.whatsappCli.Disconnect()
-	}
-
-	clientLog := walog.Stdout("whatsapp-client", "INFO", true)
-	client := whatsmeow.NewClient(deviceStore, clientLog)
-
-	client.AddEventHandler(s.whatsappEventHandler)
-	// Add disconnection handler
-	client.AddEventHandler(s.connectionEventHandler)
-
-	s.whatsappCli = client
-	s.deviceStore = deviceStore
-
-	if err := client.Connect(); err != nil {
-		return fmt.Errorf("failed to connect WhatsApp client: %w", err)
-	}
-
-	// Verify connection and login status
-	if !client.IsConnected() {
-		return fmt.Errorf("client failed to connect properly")
-	}
-	if !client.IsLoggedIn() {
-		return fmt.Errorf("client is connected but not logged in")
-	}
-
-	rlog.Info("Successfully connected to WhatsApp")
-	return nil
-}
-
-func (s *Service) connectionEventHandler(evt interface{}) {
-	switch evt.(type) {
-	case *events.Disconnected:
-		rlog.Error("WhatsApp disconnected")
-		s.scheduleReconnect()
-	case *events.Connected:
-		rlog.Info("WhatsApp connected")
-		// Cancel any pending reconnection attempts
-		if s.reconnectTimer != nil {
-			s.reconnectTimer.Stop()
-		}
-	}
-}
-
-func (s *Service) scheduleReconnect() {
-	s.clientLock.Lock()
-	defer s.clientLock.Unlock()
-
-	if s.reconnectTimer != nil {
-		s.reconnectTimer.Stop()
-	}
-
-	s.reconnectTimer = time.AfterFunc(5*time.Second, func() {
-		if s.deviceStore == nil {
-			rlog.Error("No device store available for reconnection")
-			return
-		}
-
-		err := s.connectToWhatsApp(s.deviceStore)
-		if err != nil {
-			rlog.Error("Failed to reconnect to WhatsApp", "error", err)
-			// Schedule another reconnection attempt with exponential backoff
-			s.scheduleReconnect()
-		}
-	})
-}
-
-func (s *Service) startConnectionMonitor() {
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			s.clientLock.Lock()
-			if s.whatsappCli == nil || !s.whatsappCli.IsConnected() || !s.whatsappCli.IsLoggedIn() {
-				rlog.Info("Connection monitor detected disconnected state, attempting reconnection")
-				if s.deviceStore != nil {
-					if err := s.connectToWhatsApp(s.deviceStore); err != nil {
-						rlog.Error("Connection monitor failed to reconnect", "error", err)
-						s.scheduleReconnect()
-					}
-				}
-			}
-			s.clientLock.Unlock()
-		}
-	}()
-}
-
-//encore:api auth raw path=/whatsapp/connect
+//encore:api public raw path=/whatsapp/connect
 func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
@@ -177,7 +106,6 @@ func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// Create a new client
 	clientLog := walog.Stdout("Client", "DEBUG", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", clientLog)
 	deviceStore := container.NewDevice()
@@ -216,8 +144,6 @@ func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// WhatsappReconnect is an API method to reconnect to WhatsApp.
-//
 //encore:api auth raw path=/whatsapp/reconnect
 func (s *Service) WhatsappReconnect(w http.ResponseWriter, req *http.Request) {
 	s.clientLock.Lock()
@@ -259,75 +185,76 @@ func (s *Service) whatsappEventHandler(evt interface{}) {
 			"sender", v.Info.Sender,
 			"target", v.Info.Sender.User,
 		)
+		MessagesReceived.Increment()
 
-		resp, err := imolink.AskQuestion(
-			context.Background(),
-			imolink.QuestionInput{
-				Question: v.Message.GetConversation(),
-			},
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error asking model: %v\n", err)
+		if s.sessionMgr == nil {
+			rlog.Error("Session manager not initialized")
 			return
 		}
 
+		cleanJID := stripDeviceSuffix(v.Info.Chat)
+		err := s.whatsappCli.SendChatPresence(cleanJID, types.ChatPresenceComposing, types.ChatPresenceMediaText)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error setting chat presence: %v\n", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), messageTimeout)
+		defer cancel()
+
+		response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), v.Message.GetConversation())
+		if err != nil {
+			// Clear typing indicator before returning on error
+			_ = s.whatsappCli.SendChatPresence(cleanJID, types.ChatPresencePaused, types.ChatPresenceMediaText)
+			fmt.Fprintf(os.Stderr, "error processing message: %v\n", err)
+			return
+		}
+
+		// Clear typing indicator
+		if err := s.whatsappCli.SendChatPresence(
+			cleanJID,
+			types.ChatPresencePaused,
+			types.ChatPresenceMediaText,
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "error clearing chat presence: %v\n", err)
+		}
+
+		cleanSenderJID := stripDeviceSuffix(v.Info.Sender)
 		if _, err := s.whatsappCli.SendMessage(
 			context.Background(),
-			v.Info.Sender,
+			cleanSenderJID,
 			&waE2E.Message{
-				Conversation: &resp.Answer,
+				Conversation: &response,
 			},
 		); err != nil {
 			fmt.Fprintf(os.Stderr, "error sending message: %v\n", err)
 			return
 		}
-
-		ref := extractPropertyRef(resp.Answer)
-		if ref == "" {
-			return
-		}
-
-		url := fmt.Sprintf(
-			"%s://%s/properties/%s",
-			encore.Meta().APIBaseURL.Scheme,
-			encore.Meta().APIBaseURL.Host,
-			ref,
-		)
-
-		if _, err := s.whatsappCli.SendMessage(
-			context.Background(),
-			v.Info.Sender,
-			&waE2E.Message{
-				Conversation: &url,
-			},
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending property URL: %v\n", err)
-			return
-		}
+		MessagesSent.Increment()
 	}
 }
 
-func extractPropertyRef(message string) string {
-	patterns := []string{
-		`REF\d+`,
-		`ID da Propriedade:\s*(\S+)`,
-		`Reference:\s*(\S+)`,
-		`Referência:\s*(\S+)`,
+func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	clientLog := walog.Stdout("whatsapp-client", "INFO", true)
+	client := whatsmeow.NewClient(deviceStore, clientLog)
+
+	client.AddEventHandler(s.whatsappEventHandler)
+
+	s.whatsappCli = client
+	s.deviceStore = deviceStore
+
+	if err := client.Connect(); err != nil {
+		return fmt.Errorf("failed to connect WhatsApp client: %w", err)
 	}
+	return nil
+}
 
-	message = strings.ReplaceAll(message, "\n", " ")
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
-		if match := re.FindString(message); match != "" {
-			ref := strings.TrimSpace(match)
-
-			if strings.Contains(ref, ":") {
-				parts := strings.Split(ref, ":")
-				ref = strings.TrimSpace(parts[len(parts)-1])
-			}
-			return ref
-		}
+func stripDeviceSuffix(jid types.JID) types.JID {
+	return types.JID{
+		User:   jid.User,
+		Server: jid.Server,
+		// Device is intentionally omitted to ensure we're sending to the main user JID
 	}
-	return ""
 }

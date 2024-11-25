@@ -5,133 +5,173 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"mime/multipart"
 	"net/http"
+	"time"
+
+	"encore.app/internal/pkg/openaicli/types"
 )
 
-const completionModel = "gpt-4o-mini"
-
+// Client represents an OpenAI API client
 type Client struct {
 	apiKey     string
 	httpClient *http.Client
+	baseURL    string
 }
 
-type EmbbedingRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
+// ClientOption allows configuring the client
+type ClientOption func(*Client)
+
+// WithBaseURL sets a custom base URL for the client
+func WithBaseURL(url string) ClientOption {
+	return func(c *Client) {
+		c.baseURL = url
+	}
 }
 
-type EmbeddingResponse struct {
-	Object string      `json:"object"`
-	Data   []Embedding `json:"data"`
-	Model  string      `json:"model"`
-	Usage  Usage       `json:"usage"`
-}
-
-type Embedding struct {
-	Object    string    `json:"object"`
-	Embedding []float32 `json:"embedding"`
-	Index     int       `json:"index"`
-}
-
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-}
-
-type CompletitionRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-}
-
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type CompletitionResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Model   string   `json:"model"`
-	Created int      `json:"created"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
-}
-
-type Choice struct {
-	Index        int     `json:"index"`
-	FinishReason string  `json:"finish_reason"`
-	Message      Message `json:"message"`
-}
-
-func New(apiKey string, httpClient *http.Client) *Client {
-	return &Client{
+// New creates a new OpenAI client
+func New(apiKey string, httpClient *http.Client, opts ...ClientOption) *Client {
+	c := Client{
 		apiKey:     apiKey,
 		httpClient: httpClient,
+		baseURL:    "https://api.openai.com/v1",
 	}
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return &c
 }
 
-func (c *Client) CreateEmbedding(ctx context.Context, in EmbbedingRequest) (*EmbeddingResponse, error) {
-	jsonData, err := json.Marshal(in)
+// ListFiles retrieves a list of files that have been uploaded
+func (c *Client) ListFiles(ctx context.Context) (*types.ListResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/files", nil)
 	if err != nil {
-		return nil, fmt.Errorf("could not marshal data: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/embeddings", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
+		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(req)
 	if err != nil {
-		return nil, fmt.Errorf("could not send request: %w", err)
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var embResp EmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embResp); err != nil {
-		return nil, fmt.Errorf("could not decode response: %w", err)
-	}
-	return &embResp, nil
-}
-
-func (c *Client) CreateChatCompletition(ctx context.Context, in CompletitionRequest) (*CompletitionResponse, error) {
-	in.Model = completionModel
-
-	jsonData, err := json.Marshal(in)
-	if err != nil {
-		return nil, fmt.Errorf("could not marshal data: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not send request: %w", err)
+		return nil, fmt.Errorf("error sending request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, body)
 	}
 
-	var compResp CompletitionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&compResp); err != nil {
-		return nil, fmt.Errorf("could not decode response: %w", err)
+	var fileList types.ListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&fileList); err != nil {
+		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
-	return &compResp, nil
+	return &fileList, nil
+}
+
+// UploadFile uploads a file to OpenAI with enhanced logging
+func (c *Client) UploadFile(ctx context.Context, data io.Reader, purpose string) (*types.FileUploadResponse, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	filename := fmt.Sprintf("data_%d.json", time.Now().UnixNano())
+
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return nil, fmt.Errorf("error creating form file: %w", err)
+	}
+
+	if _, err := io.Copy(part, data); err != nil {
+		return nil, fmt.Errorf("error copying data to form file: %w", err)
+	}
+
+	if err := writer.WriteField("purpose", purpose); err != nil {
+		return nil, fmt.Errorf("error writing purpose field: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("error closing multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/files", &body)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		log.Printf("File upload failed. Status: %d, Response: %s", resp.StatusCode, responseBody)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, responseBody)
+	}
+
+	var uploadResp types.FileUploadResponse
+	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
+		return nil, fmt.Errorf("error decoding response: %w", err)
+	}
+	return &uploadResp, nil
+}
+
+func (c *Client) GetFileContent(ctx context.Context, fileID string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("%s/files/%s", c.baseURL, fileID),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving file metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var fileInfo types.FileDetails
+	if err := json.NewDecoder(resp.Body).Decode(&fileInfo); err != nil {
+		return nil, fmt.Errorf("error decoding file metadata: %w", err)
+	}
+
+	if fileInfo.Purpose == "assistants" {
+		log.Printf("File %s is an assistant file and cannot be downloaded directly", fileID)
+		return nil, fmt.Errorf("cannot download files with purpose: assistants")
+	}
+
+	contentReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("%s/files/%s/content", c.baseURL, fileID),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error creating content request: %w", err)
+	}
+
+	contentReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	contentResp, err := c.doWithRetry(contentReq)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving file content: %w", err)
+	}
+	defer contentResp.Body.Close()
+
+	content, err := io.ReadAll(contentResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %w", err)
+	}
+	return content, nil
 }

@@ -9,13 +9,11 @@ import (
 	"net/http"
 	"time"
 
-	"encore.app/imolink"
+	"encore.app/domain"
 	"encore.app/internal/pkg/apierror"
-	"encore.app/internal/pkg/idutil"
 
 	"encore.dev/beta/errs"
 	"encore.dev/storage/sqldb"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -45,54 +43,95 @@ func initService() (*Service, error) {
 	return &Service{templ: tmpl}, nil
 }
 
-//encore:api auth method=POST path=/properties
-func (s *Service) Create(ctx context.Context, in *Properties) error {
-	group, _ := errgroup.WithContext(context.Background())
+//encore:api public method=POST path=/properties
+func (s *Service) Create(ctx context.Context, in *domain.Properties) error {
+	for _, prop := range in.Properties {
+		exists, err := propertyExists(ctx, prop.ID)
+		if err != nil {
+			return fmt.Errorf("could not check property existence: %w", err)
+		}
 
-	for _, p := range in.Properties {
-		group.Go(func() error {
-			id, err := idutil.NewID()
-			if err != nil {
-				return fmt.Errorf("could not generate ID: %w", err)
+		if exists {
+			if err := updateProperty(ctx, prop); err != nil {
+				return fmt.Errorf("could not update property: %w", err)
 			}
-			p.ID = id
-
-			if err := s.storeProperties(ctx, p); err != nil {
-				return fmt.Errorf("could not store properties: %w", err)
-			}
-
-			p.Info.Photo = ImageData{}
-			p.Info.Blueprint = ImageData{}
-
-			imolink.NewPropertiesTopic.Publish(
-				ctx,
-				&imolink.NewPropertyEvent{
-					Data: p.String(),
-				},
-			)
-			return nil
-		})
-	}
-
-	if err := group.Wait(); err != nil {
-		return apierror.E("could not add properties", err, errs.Internal)
+			continue
+		}
+		if err := insertProperty(ctx, prop); err != nil {
+			return fmt.Errorf("could not store property: %w", err)
+		}
 	}
 	return nil
 }
 
-//encore:api auth method=GET path=/properties
-func (s *Service) List(ctx context.Context) (*Properties, error) {
-	query := `
-		SELECT
-			id, name, area, num_bedrooms, num_bathrooms, num_garage_spots,
-			price, street, number, district, city, state, property_type,
-			reference, 
-			photo_base64_data, photo_format, photo_upload_date,
-			blueprint_base64_data, blueprint_format, blueprint_upload_date,
-			description, year_built, builder,
-			features,
-			created_at, updated_at
-		FROM properties`
+func propertyExists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM properties WHERE id = $1)
+	`, id).Scan(&exists)
+
+	if err != nil {
+		return false, fmt.Errorf("error checking property existence: %w", err)
+	}
+	return exists, nil
+}
+
+func updateProperty(ctx context.Context, prop *domain.Property) error {
+	_, err := db.Exec(ctx, `
+		UPDATE properties SET
+			name = $1, area = $2, num_bedrooms = $3, num_bathrooms = $4,
+			num_garage_spots = $5, price = $6, street = $7, number = $8,
+			district = $9, city = $10, state = $11, property_type = $12,
+			reference = $13, description = $14, year_built = $15,
+			builder = $16, features = $17, updated_at = NOW()
+		WHERE id = $18
+	`,
+		prop.Name, prop.Area, prop.NumBedrooms, prop.NumBathrooms,
+		prop.NumGarageSpots, prop.Price, prop.Street, prop.Number,
+		prop.District, prop.City, prop.State, prop.PropertyType,
+		prop.Reference, prop.Description, prop.YearBuilt,
+		prop.Builder, prop.Features, prop.ID,
+	)
+	return err
+}
+
+func insertProperty(ctx context.Context, prop *domain.Property) error {
+	_, err := db.Exec(ctx, `
+		INSERT INTO properties (
+			id, name, area, num_bedrooms, num_bathrooms,
+			num_garage_spots, price, street, number,
+			district, city, state, property_type,
+			reference, description, year_built,
+			builder, features, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16, $17, $18,
+			NOW(), NOW()
+		)
+	`,
+		prop.ID, prop.Name, prop.Area, prop.NumBedrooms, prop.NumBathrooms,
+		prop.NumGarageSpots, prop.Price, prop.Street, prop.Number,
+		prop.District, prop.City, prop.State, prop.PropertyType,
+		prop.Reference, prop.Description, prop.YearBuilt,
+		prop.Builder, prop.Features,
+	)
+	return err
+}
+
+type ListInput struct {
+	WithImagesBase64 bool `json:"with_images_base64"`
+}
+
+//encore:api public method=GET path=/properties
+func (s *Service) List(ctx context.Context, in ListInput) (*domain.Properties, error) {
+	query := `SELECT 
+        id, name, area, num_bedrooms, num_bathrooms, num_garage_spots, 
+        price, street, number, district, city, state, property_type,
+        reference, description, year_built, builder, features,
+        photo_base64_data, photo_format, photo_upload_date,
+        blueprint_base64_data, blueprint_format, blueprint_upload_date,
+        created_at, updated_at
+    FROM properties`
 
 	rows, err := db.Query(ctx, query)
 	if err != nil {
@@ -100,34 +139,29 @@ func (s *Service) List(ctx context.Context) (*Properties, error) {
 	}
 	defer rows.Close()
 
-	props := Properties{
-		Properties: make([]*Property, 0),
+	props := domain.Properties{
+		Properties: make([]*domain.Property, 0),
 	}
 
 	for rows.Next() {
-		var (
-			p    Property
-			addr Address
-			info Info
-		)
-
+		var p domain.Property
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.Area, &p.NumBedrooms, &p.NumBathrooms, &p.NumGarageSpots,
-			&p.Price, &addr.Street, &addr.Number, &addr.District, &addr.City, &addr.State,
-			&p.Type, &info.Reference,
-			&info.Photo.Base64Data, &info.Photo.Format, &info.Photo.UploadDate,
-			&info.Blueprint.Base64Data, &info.Blueprint.Format, &info.Blueprint.UploadDate,
-			&info.Description, &info.YearBuilt, &info.Builder, &info.Features,
+			&p.Price, &p.Street, &p.Number, &p.District, &p.City, &p.State, &p.PropertyType,
+			&p.Reference, &p.Description, &p.YearBuilt, &p.Builder, &p.Features,
+			&p.PhotoBase64Data, &p.PhotoFormat, &p.PhotoUploadDate,
+			&p.BlueprintBase64Data, &p.BlueprintFormat, &p.BlueprintUploadDate,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
-			if errors.Is(err, sqldb.ErrNoRows) {
-				return nil, nil
-			}
 			return nil, apierror.E("could not scan properties", err, errs.Internal)
 		}
 
-		p.Address = addr
-		p.Info = info
+		// Clear image data if WithImagesBase64 is false
+		// TODO: This should be done in the query itself
+		if !in.WithImagesBase64 {
+			p.PhotoBase64Data = nil
+			p.BlueprintBase64Data = nil
+		}
 		props.Properties = append(props.Properties, &p)
 	}
 	return &props, nil
@@ -155,34 +189,29 @@ func (s *Service) Serve(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (s *Service) fetchProperty(ctx context.Context, ref string) (*Property, error) {
+func (s *Service) fetchProperty(ctx context.Context, ref string) (*domain.Property, error) {
 	query := `
         SELECT 
             id, name, area, num_bedrooms, num_bathrooms, num_garage_spots, 
             price, street, number, district, city, state, property_type,
-            reference, 
+            reference, description, year_built, builder, features,
             photo_base64_data, photo_format, photo_upload_date,
             blueprint_base64_data, blueprint_format, blueprint_upload_date,
-            COALESCE(description, ''), year_built, COALESCE(builder, ''), 
-            COALESCE(features, ARRAY[]::text[])
+            created_at, updated_at
         FROM properties
         WHERE reference = $1
         LIMIT 1`
 
-	var (
-		p    Property
-		addr Address
-		info Info
-	)
+	var p domain.Property
 
 	row := db.QueryRow(ctx, query, ref)
 	if err := row.Scan(
 		&p.ID, &p.Name, &p.Area, &p.NumBedrooms, &p.NumBathrooms, &p.NumGarageSpots,
-		&p.Price, &addr.Street, &addr.Number, &addr.District, &addr.City, &addr.State,
-		&p.Type, &info.Reference,
-		&info.Photo.Base64Data, &info.Photo.Format, &info.Photo.UploadDate,
-		&info.Blueprint.Base64Data, &info.Blueprint.Format, &info.Blueprint.UploadDate,
-		&info.Description, &info.YearBuilt, &info.Builder, &info.Features,
+		&p.Price, &p.Street, &p.Number, &p.District, &p.City, &p.State, &p.PropertyType,
+		&p.Reference, &p.Description, &p.YearBuilt, &p.Builder, &p.Features,
+		&p.PhotoBase64Data, &p.PhotoFormat, &p.PhotoUploadDate,
+		&p.BlueprintBase64Data, &p.BlueprintFormat, &p.BlueprintUploadDate,
+		&p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, sqldb.ErrNoRows) {
 			return nil, nil
@@ -190,27 +219,22 @@ func (s *Service) fetchProperty(ctx context.Context, ref string) (*Property, err
 		return nil, fmt.Errorf("could not scan property: %w", err)
 	}
 
-	p.Address = addr
-	p.Info = info
-
 	return &p, nil
 }
 
-func (s *Service) storeProperties(ctx context.Context, p *Property) error {
+func (s *Service) storeProperties(ctx context.Context, p *domain.Property) error {
 	query := `
         INSERT INTO properties (
             id, name, area, num_bedrooms, num_bathrooms, num_garage_spots, 
             price, street, number, district, city, state, property_type,
-            reference, 
+            reference, description, year_built, builder, features,
             photo_base64_data, photo_format, photo_upload_date,
             blueprint_base64_data, blueprint_format, blueprint_upload_date,
-            description, year_built, builder, 
-            features,
             created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-            $24, $25, $26
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+            $25, $26
         )`
 
 	now := time.Now()
@@ -222,12 +246,10 @@ func (s *Service) storeProperties(ctx context.Context, p *Property) error {
 
 	if _, err := db.Exec(ctx, query,
 		p.ID, p.Name, p.Area, p.NumBedrooms, p.NumBathrooms, p.NumGarageSpots,
-		p.Price, p.Address.Street, p.Address.Number, p.Address.District,
-		p.Address.City, p.Address.State, p.Type,
-		p.Info.Reference,
-		p.Info.Photo.Base64Data, p.Info.Photo.Format, p.Info.Photo.UploadDate,
-		p.Info.Blueprint.Base64Data, p.Info.Blueprint.Format, p.Info.Blueprint.UploadDate,
-		p.Info.Description, p.Info.YearBuilt, p.Info.Builder, p.Info.Features,
+		p.Price, p.Street, p.Number, p.District, p.City, p.State, p.PropertyType,
+		p.Reference, p.Description, p.YearBuilt, p.Builder, p.Features,
+		p.PhotoBase64Data, p.PhotoFormat, p.PhotoUploadDate,
+		p.BlueprintBase64Data, p.BlueprintFormat, p.BlueprintUploadDate,
 		p.CreatedAt, p.UpdatedAt,
 	); err != nil {
 		return fmt.Errorf("could not store property: %w", err)
@@ -235,10 +257,11 @@ func (s *Service) storeProperties(ctx context.Context, p *Property) error {
 	return nil
 }
 
-//encore:api private method=DELETE path=/properties
+//encore:api public method=DELETE path=/properties
 func (s *Service) Delete(ctx context.Context) error {
-	if _, err := db.Exec(ctx, "DELETE FROM properties"); err != nil {
-		return fmt.Errorf("could not purge properties: %w", err)
+	// Use DELETE instead of TRUNCATE since we don't have TRUNCATE permissions
+	if _, err := db.Exec(ctx, `DELETE FROM properties`); err != nil {
+		return fmt.Errorf("could not delete properties: %w", err)
 	}
 	return nil
 }

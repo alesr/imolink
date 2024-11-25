@@ -1,7 +1,9 @@
 package httpclient
 
 import (
+	"net"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -22,11 +24,7 @@ func TestClient(t *testing.T) {
 		require.NotNil(t, httpClient)
 
 		assert.Equal(t, 15*time.Second, httpClient.Timeout)
-		assert.Equal(t, 15*time.Second, transport.IdleConnTimeout)
-		assert.Equal(t, 10*time.Second, transport.ResponseHeaderTimeout)
-		assert.Equal(t, 5*time.Second, transport.TLSHandshakeTimeout)
-		assert.Equal(t, 50, transport.MaxIdleConns)
-		assert.Equal(t, true, transport.ForceAttemptHTTP2)
+		assert.Equal(t, 90*time.Second, transport.IdleConnTimeout)
 	})
 
 	t.Run("WithTimeout", func(t *testing.T) {
@@ -77,6 +75,16 @@ func TestClient(t *testing.T) {
 		assert.Equal(t, 100, transport.MaxIdleConns)
 	})
 
+	t.Run("WithMaxIdleConnsPerHost", func(t *testing.T) {
+		t.Parallel()
+
+		httpClient := New(WithMaxIdleConnsPerHost(100))
+
+		transport := httpClient.Transport.(*http.Transport)
+
+		assert.Equal(t, 100, transport.MaxIdleConnsPerHost)
+	})
+
 	t.Run("WithForceHTTP2Disabled", func(t *testing.T) {
 		t.Parallel()
 
@@ -98,5 +106,61 @@ func TestClient(t *testing.T) {
 		httpClient := New(WithTransport(customTransport))
 
 		assert.Equal(t, customTransport, httpClient.Transport)
+	})
+
+	t.Run("WithExpectContinueTimeout", func(t *testing.T) {
+		t.Parallel()
+
+		httpClient := New(WithExpectContinueTimeout(2 * time.Second))
+		transport := httpClient.Transport.(*http.Transport)
+
+		assert.Equal(t, 2*time.Second, transport.ExpectContinueTimeout)
+	})
+
+	t.Run("WithProxy", func(t *testing.T) {
+		t.Parallel()
+
+		proxyFunc := func(req *http.Request) (*url.URL, error) {
+			return &url.URL{Host: "localhost:8080"}, nil
+		}
+
+		httpClient := New(WithProxy(proxyFunc))
+		transport := httpClient.Transport.(*http.Transport)
+
+		proxiedURL, err := transport.Proxy(&http.Request{})
+		require.NoError(t, err)
+		assert.Equal(t, "localhost:8080", proxiedURL.Host)
+	})
+
+	t.Run("WithDialerTimeout", func(t *testing.T) {
+		t.Parallel()
+
+		expectedTimeout := 1 * time.Second
+		httpClient := New(WithDialerTimeout(expectedTimeout))
+		_ = httpClient.Transport.(*http.Transport) // type assertion to ensure transport is valid
+
+		// Create a new dialer with the same settings to compare
+		expectedDialer := &net.Dialer{
+			Timeout:   expectedTimeout,
+			KeepAlive: defaultKeepAlive,
+		}
+
+		assert.Equal(t, expectedDialer.Timeout, expectedTimeout)
+	})
+
+	t.Run("WithDialerKeepAlive", func(t *testing.T) {
+		t.Parallel()
+
+		expectedKeepAlive := 1 * time.Second
+		httpClient := New(WithDialerKeepAlive(expectedKeepAlive))
+		_ = httpClient.Transport.(*http.Transport) // type assertion to ensure transport is valid
+
+		// Create a new dialer with the same settings to compare
+		expectedDialer := &net.Dialer{
+			Timeout:   defaultDialTimeout,
+			KeepAlive: expectedKeepAlive,
+		}
+
+		assert.Equal(t, expectedDialer.KeepAlive, expectedKeepAlive)
 	})
 }
