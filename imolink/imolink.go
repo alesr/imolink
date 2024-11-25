@@ -108,7 +108,7 @@ type (
 )
 
 //encore:api private method=POST path=/imolink/question
-func (u *Service) Question(ctx context.Context, in QuestionInput) (*QuestionOutput, error) {
+func (u *Service) AskQuestion(ctx context.Context, in QuestionInput) (*QuestionOutput, error) {
 	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
 		Model: embbedingModel,
 		Input: in.Question,
@@ -147,7 +147,7 @@ func (u *Service) Question(ctx context.Context, in QuestionInput) (*QuestionOutp
 type TrainingDataInput struct{ Data string }
 
 //encore:api private method=POST path=/imolink/training-data
-func (u *Service) TrainingData(ctx context.Context, in TrainingDataInput) error {
+func (u *Service) AddTrainingData(ctx context.Context, in TrainingDataInput) error {
 	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
 		Model: embbedingModel,
 		Input: in.Data,
@@ -175,7 +175,7 @@ func (u *Service) TrainingData(ctx context.Context, in TrainingDataInput) error 
 }
 
 //encore:api private method=DELETE path=/imolink/training-data
-func (s *Service) Delete(ctx context.Context) error {
+func (s *Service) DeleteTrainingData(ctx context.Context) error {
 	if err := s.repo.Purge(ctx); err != nil {
 		return apierror.E("could not purge", err, errs.Internal)
 	}
@@ -183,7 +183,7 @@ func (s *Service) Delete(ctx context.Context) error {
 }
 
 func train(ctx context.Context, q *NewPropertyEvent) error {
-	if err := TrainingData(ctx, TrainingDataInput{Data: q.Data}); err != nil {
+	if err := AddTrainingData(ctx, TrainingDataInput{Data: q.Data}); err != nil {
 		return fmt.Errorf("could not ask: %w", err)
 	}
 	return nil

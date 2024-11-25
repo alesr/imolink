@@ -46,7 +46,7 @@ func initService() (*Service, error) {
 }
 
 //encore:api auth method=POST path=/properties
-func (s *Service) AddProperties(ctx context.Context, in *Properties) error {
+func (s *Service) Create(ctx context.Context, in *Properties) error {
 	group, _ := errgroup.WithContext(context.Background())
 
 	for _, p := range in.Properties {
@@ -81,7 +81,7 @@ func (s *Service) AddProperties(ctx context.Context, in *Properties) error {
 }
 
 //encore:api auth method=GET path=/properties
-func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
+func (s *Service) Get(ctx context.Context) (*Properties, error) {
 	query := `
 		SELECT
 			id, name, area, num_bedrooms, num_bathrooms, num_garage_spots,
@@ -134,7 +134,7 @@ func (s *Service) GetProperties(ctx context.Context) (*Properties, error) {
 }
 
 //encore:api public raw path=/properties/:ref
-func (s *Service) ServeProperties(w http.ResponseWriter, req *http.Request) {
+func (s *Service) Serve(w http.ResponseWriter, req *http.Request) {
 	ref := req.URL.Path[len("/properties/"):]
 
 	prop, err := s.fetchProperty(req.Context(), ref)

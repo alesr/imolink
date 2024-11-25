@@ -35,7 +35,7 @@ func (s *Service) Sample(ctx context.Context) error {
 		return apierror.E("could not get sample properties", err, errs.Internal)
 	}
 
-	if err := properties.AddProperties(
+	if err := properties.Create(
 		ctx,
 		&properties.Properties{Properties: sampleProps},
 	); err != nil {
@@ -47,7 +47,7 @@ func (s *Service) Sample(ctx context.Context) error {
 //encore:api auth method=DELETE path=/sample
 func (s *Service) Delete(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
-	if err := imolink.Delete(ctx); err != nil {
+	if err := imolink.DeleteTrainingData(ctx); err != nil {
 		return apierror.E("could not purge imolink", err, errs.Internal)
 	}
 	if err := properties.Delete(ctx); err != nil {
