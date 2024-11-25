@@ -33,6 +33,7 @@ var (
 	}
 )
 
+//encore:service
 type Service struct {
 	whatsappCli    *whatsmeow.Client
 	deviceStore    *store.Device
