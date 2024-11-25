@@ -16,7 +16,7 @@
 
 The Imolink application is built using a microservices architecture, with each service handling a specific set of tasks.
 
-![Imolink Architecture](encore-flow.png)
+![encore-flow](encore-flow.png)
 
 ## Services
 
