@@ -91,7 +91,7 @@ At any time, you can add new properties, which will trigger the training of the 
 
 Be careful about duplicate data, as the AI model will be trained with the same data multiple times. No validation is done to prevent this at the moment.
 
-After running Encore, you can access the dashboard at http://localhost:9400/imolink-cmr2. The dashboard provides an overview of all services and their endpoints.
+After running Encore, you can access the dashboard at <http://localhost:9400/imolink-cmr2>. The dashboard provides an overview of all services and their endpoints.
 
 **Connect to WhatsApp**: Access the `GET /whatsapp/connect` endpoint to connect the WhatsApp client.
 
