@@ -184,7 +184,7 @@ func (s *Service) whatsappEventHandler(evt interface{}) {
 			"target", v.Info.Sender.User,
 		)
 
-		resp, err := imolink.Question(
+		resp, err := imolink.AskQuestion(
 			context.Background(),
 			imolink.QuestionInput{
 				Question: v.Message.GetConversation(),
