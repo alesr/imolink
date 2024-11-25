@@ -81,7 +81,7 @@ func (s *Service) Create(ctx context.Context, in *Properties) error {
 }
 
 //encore:api auth method=GET path=/properties
-func (s *Service) Get(ctx context.Context) (*Properties, error) {
+func (s *Service) List(ctx context.Context) (*Properties, error) {
 	query := `
 		SELECT
 			id, name, area, num_bedrooms, num_bathrooms, num_garage_spots,

@@ -175,7 +175,7 @@ func (u *Service) AddTrainingData(ctx context.Context, in TrainingDataInput) err
 }
 
 //encore:api private method=DELETE path=/imolink/training-data
-func (s *Service) DeleteTrainingData(ctx context.Context) error {
+func (s *Service) RemoveTrainingData(ctx context.Context) error {
 	if err := s.repo.Purge(ctx); err != nil {
 		return apierror.E("could not purge", err, errs.Internal)
 	}
