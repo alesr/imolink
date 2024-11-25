@@ -23,8 +23,11 @@ Handles WhatsApp client connections and interactions.
 Manages property data and serves property details.
 
 **Create Properties**: `POST /properties` - Adds new properties to the database.
+
 **List Properties**: `GET /properties` - Retrieves all properties.
+
 **Serve Property**: `GET /properties/:ref` - Serves property details as an HTML page.
+
 **Delete Properties**: `DELETE /properties` - Deletes all properties from the database.
 
 ### Imolink Service
@@ -32,7 +35,9 @@ Manages property data and serves property details.
 Handles AI interactions and embeddings.
 
 **Ask Question**: `POST /imolink/question` - Processes user questions and provides AI-generated answers.
+
 **Add Training Data**: `POST /imolink/training-data` - Trains the AI model with new data.
+
 **Remove Training Data**: `DELETE /imolink/training-data` - Purges all embeddings from the database.
 
 ### Auth Service
@@ -46,11 +51,13 @@ Provides authentication for API endpoints.
 Utility service for administrative tasks.
 
 **Sample**: `POST /sample` - Purges all data and adds sample properties to the database.
+
 **Purge**: `DELETE /sample` - Purges all data from Imolink and Properties services.
 
 ## Setup
 
 **Install Docker**: Install Docker and Docker Compose on your machine.
+
 **Install Encore**: Install the Encore CLI tool for managing services.
 
 ## Usage
@@ -76,7 +83,9 @@ Be careful about duplicate data, as the AI model will be trained with the same d
 After running Encore, you can access the dashboard at http://localhost:9400/imolink-cmr2. The dashboard provides an overview of all services and their endpoints.
 
 **Connect to WhatsApp**: Access the `GET /whatsapp/connect` endpoint to connect the WhatsApp client.
+
 **Manage Properties**: Use the `GET /properties` endpoints to add and retrieve property data.
+
 **Interact with AI**: Send messages to the **WhatsApp chatbot** to ask questions and get suggestions about properties.
 
 ## Authentication
