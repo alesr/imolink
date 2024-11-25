@@ -25,6 +25,7 @@ The Imolink application is built using a microservices architecture, with each s
 Handles WhatsApp client connections and interactions.
 
 **Connect**: `GET /whatsapp/connect` - Connects to WhatsApp and provides a QR code for login.
+
 **Reconnect**: `GET /whatsapp/reconnect` - Reconnects to WhatsApp using stored device information.
 
 ### Properties Service
