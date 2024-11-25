@@ -78,7 +78,7 @@ var (
 
 	_ = pubsub.NewSubscription(
 		NewPropertiesTopic,
-		"train",
+		"new-property",
 		pubsub.SubscriptionConfig[*NewPropertyEvent]{
 			Handler: train,
 		},
