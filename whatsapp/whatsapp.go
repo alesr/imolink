@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"encore.app/imolink"
 	"encore.dev"
@@ -32,20 +33,18 @@ var (
 	}
 )
 
-// Service is the main service for the WhatsApp API.
-//
-//encore:service
 type Service struct {
-	whatsappCli *whatsmeow.Client
-	deviceStore *store.Device
-	clientLock  sync.Mutex
+	whatsappCli    *whatsmeow.Client
+	deviceStore    *store.Device
+	clientLock     sync.Mutex
+	reconnectTimer *time.Timer
 }
 
 func initService() (*Service, error) {
 	dbLog := walog.Stdout("whatsapp-database", "INFO", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
 
-	s := new(Service)
+	s := &Service{}
 
 	deviceStore, err := container.GetFirstDevice()
 	if err != nil {
@@ -57,12 +56,13 @@ func initService() (*Service, error) {
 
 	if deviceStore != nil {
 		if err := s.connectToWhatsApp(deviceStore); err != nil {
-			return nil, fmt.Errorf("failed to reconnect to WhatsApp: %w", err)
+			rlog.Error("Failed to connect to WhatsApp during init", "error", err)
+			// Don't return error here - we'll attempt reconnection
 		}
+		s.startConnectionMonitor()
 	}
 
 	s.deviceStore = deviceStore
-
 	return s, nil
 }
 
@@ -70,10 +70,17 @@ func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
+	// If we already have a connected client, disconnect it first
+	if s.whatsappCli != nil {
+		s.whatsappCli.Disconnect()
+	}
+
 	clientLog := walog.Stdout("whatsapp-client", "INFO", true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 
 	client.AddEventHandler(s.whatsappEventHandler)
+	// Add disconnection handler
+	client.AddEventHandler(s.connectionEventHandler)
 
 	s.whatsappCli = client
 	s.deviceStore = deviceStore
@@ -81,7 +88,75 @@ func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect WhatsApp client: %w", err)
 	}
+
+	// Verify connection and login status
+	if !client.IsConnected() {
+		return fmt.Errorf("client failed to connect properly")
+	}
+	if !client.IsLoggedIn() {
+		return fmt.Errorf("client is connected but not logged in")
+	}
+
+	rlog.Info("Successfully connected to WhatsApp")
 	return nil
+}
+
+func (s *Service) connectionEventHandler(evt interface{}) {
+	switch evt.(type) {
+	case *events.Disconnected:
+		rlog.Error("WhatsApp disconnected")
+		s.scheduleReconnect()
+	case *events.Connected:
+		rlog.Info("WhatsApp connected")
+		// Cancel any pending reconnection attempts
+		if s.reconnectTimer != nil {
+			s.reconnectTimer.Stop()
+		}
+	}
+}
+
+func (s *Service) scheduleReconnect() {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	if s.reconnectTimer != nil {
+		s.reconnectTimer.Stop()
+	}
+
+	s.reconnectTimer = time.AfterFunc(5*time.Second, func() {
+		if s.deviceStore == nil {
+			rlog.Error("No device store available for reconnection")
+			return
+		}
+
+		err := s.connectToWhatsApp(s.deviceStore)
+		if err != nil {
+			rlog.Error("Failed to reconnect to WhatsApp", "error", err)
+			// Schedule another reconnection attempt with exponential backoff
+			s.scheduleReconnect()
+		}
+	})
+}
+
+func (s *Service) startConnectionMonitor() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			s.clientLock.Lock()
+			if s.whatsappCli == nil || !s.whatsappCli.IsConnected() || !s.whatsappCli.IsLoggedIn() {
+				rlog.Info("Connection monitor detected disconnected state, attempting reconnection")
+				if s.deviceStore != nil {
+					if err := s.connectToWhatsApp(s.deviceStore); err != nil {
+						rlog.Error("Connection monitor failed to reconnect", "error", err)
+						s.scheduleReconnect()
+					}
+				}
+			}
+			s.clientLock.Unlock()
+		}
+	}()
 }
 
 //encore:api auth raw path=/whatsapp/connect
