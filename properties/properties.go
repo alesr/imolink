@@ -237,7 +237,7 @@ func (s *Service) storeProperties(ctx context.Context, p *Property) error {
 
 //encore:api private method=DELETE path=/properties
 func (s *Service) Purge(ctx context.Context) error {
-	if _, err := db.Exec(ctx, "TRUNCATE properties"); err != nil {
+	if _, err := db.Exec(ctx, "DELETE FROM properties"); err != nil {
 		return fmt.Errorf("could not purge properties: %w", err)
 	}
 	return nil
