@@ -22,7 +22,9 @@ const (
 )
 
 var (
-	db = sqldb.Named("imolink")
+	db = sqldb.NewDatabase("imolink", sqldb.DatabaseConfig{
+		Migrations: "./migrations",
+	})
 
 	secrets struct {
 		OpenAIKey string
