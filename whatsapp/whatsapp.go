@@ -23,7 +23,9 @@ import (
 )
 
 var (
-	db = sqldb.Named("whatsapp")
+	db = sqldb.NewDatabase("whatsapp", sqldb.DatabaseConfig{
+		Migrations: "./migrations",
+	})
 
 	secrets struct {
 		OpenAIKey string

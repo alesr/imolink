@@ -19,7 +19,9 @@ import (
 )
 
 var (
-	db = sqldb.Named("properties")
+	db = sqldb.NewDatabase("properties", sqldb.DatabaseConfig{
+		Migrations: "./migrations",
+	})
 
 	//go:embed templates/*.html
 	templatesFS embed.FS
