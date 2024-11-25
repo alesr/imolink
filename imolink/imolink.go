@@ -103,12 +103,12 @@ func initService() (*Service, error) {
 }
 
 type (
-	AskInput  struct{ Question string }
-	AskOutput struct{ Answer string }
+	QuestionInput  struct{ Question string }
+	QuestionOutput struct{ Answer string }
 )
 
-//encore:api private method=POST path=/ask
-func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
+//encore:api private method=POST path=/imolink/question
+func (u *Service) Question(ctx context.Context, in QuestionInput) (*QuestionOutput, error) {
 	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
 		Model: embbedingModel,
 		Input: in.Question,
@@ -141,13 +141,13 @@ func (u *Service) Ask(ctx context.Context, in AskInput) (*AskOutput, error) {
 	if err != nil {
 		return nil, apierror.E("could not create chat completition", err, errs.Internal)
 	}
-	return &AskOutput{Answer: completition.Choices[0].Message.Content}, nil
+	return &QuestionOutput{Answer: completition.Choices[0].Message.Content}, nil
 }
 
-type TrainingData struct{ Data string }
+type TrainingDataInput struct{ Data string }
 
-//encore:api private method=POST path=/train
-func (u *Service) Train(ctx context.Context, in TrainingData) error {
+//encore:api private method=POST path=/imolink/training-data
+func (u *Service) TrainingData(ctx context.Context, in TrainingDataInput) error {
 	embedd, err := u.client.CreateEmbedding(ctx, openaicli.EmbbedingRequest{
 		Model: embbedingModel,
 		Input: in.Data,
@@ -174,8 +174,8 @@ func (u *Service) Train(ctx context.Context, in TrainingData) error {
 	return nil
 }
 
-//encore:api private method=DELETE path=/embeddings
-func (s *Service) Purge(ctx context.Context) error {
+//encore:api private method=DELETE path=/imolink/training-data
+func (s *Service) Delete(ctx context.Context) error {
 	if err := s.repo.Purge(ctx); err != nil {
 		return apierror.E("could not purge", err, errs.Internal)
 	}
@@ -183,7 +183,7 @@ func (s *Service) Purge(ctx context.Context) error {
 }
 
 func train(ctx context.Context, q *NewPropertyEvent) error {
-	if err := Train(ctx, TrainingData{Data: q.Data}); err != nil {
+	if err := TrainingData(ctx, TrainingDataInput{Data: q.Data}); err != nil {
 		return fmt.Errorf("could not ask: %w", err)
 	}
 	return nil

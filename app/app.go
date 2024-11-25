@@ -26,7 +26,7 @@ func initService() (*Service, error) {
 func (s *Service) Sample(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
 
-	if err := s.Purge(ctx); err != nil {
+	if err := s.Delete(ctx); err != nil {
 		return apierror.E("could not purge", err, errs.Internal)
 	}
 
@@ -44,13 +44,13 @@ func (s *Service) Sample(ctx context.Context) error {
 	return nil
 }
 
-//encore:api auth method=DELETE path=/purge
-func (s *Service) Purge(ctx context.Context) error {
+//encore:api auth method=DELETE path=/sample
+func (s *Service) Delete(ctx context.Context) error {
 	ctx = context.Background() // without cancellation
-	if err := imolink.Purge(ctx); err != nil {
+	if err := imolink.Delete(ctx); err != nil {
 		return apierror.E("could not purge imolink", err, errs.Internal)
 	}
-	if err := properties.Purge(ctx); err != nil {
+	if err := properties.Delete(ctx); err != nil {
 		return apierror.E("could not purge properties", err, errs.Internal)
 	}
 	return nil
