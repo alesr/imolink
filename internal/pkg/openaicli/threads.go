@@ -57,7 +57,7 @@ func (c *Client) AddMessage(ctx context.Context, in types.CreateMessageInput) er
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("OpenAI-Beta", "assistants=v1")
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *Client) GetMessages(ctx context.Context, threadID string) (*types.Threa
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("OpenAI-Beta", "assistants=v1")
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
