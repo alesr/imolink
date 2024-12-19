@@ -102,15 +102,12 @@ func (c *Client) GetMessages(ctx context.Context, threadID string) (*types.Threa
 	return &messages, nil
 }
 
-func (c *Client) RunThread(ctx context.Context, threadID string, assistantID string) (*types.Run, error) {
-	// Simplified input without tools
-	input := struct {
+func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*types.Run, error) {
+	jsonData, err := json.Marshal(struct {
 		AssistantID string `json:"assistant_id"`
 	}{
 		AssistantID: assistantID,
-	}
-
-	jsonData, err := json.Marshal(input)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal run input: %w", err)
 	}

@@ -175,3 +175,115 @@ func (c *Client) GetFileContent(ctx context.Context, fileID string) ([]byte, err
 	}
 	return content, nil
 }
+
+type CreateVectorStoreRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	FileIDs     []string `json:"file_ids"`
+}
+
+type VectorStoreResponse struct {
+	ID         string `json:"id"`
+	Object     string `json:"object"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	UsageBytes int    `json:"usage_bytes"`
+	CreatedAt  int64  `json:"created_at"`
+	FileCounts struct {
+		InProgress int `json:"in_progress"`
+		Completed  int `json:"completed"`
+		Failed     int `json:"failed"`
+		Cancelled  int `json:"cancelled"`
+		Total      int `json:"total"`
+	} `json:"file_counts"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	ExpiresAfter interface{}            `json:"expires_after"`
+	ExpiresAt    interface{}            `json:"expires_at"`
+	LastActiveAt int64                  `json:"last_active_at"`
+}
+
+func (c *Client) CreateVectorStore(ctx context.Context, in *CreateVectorStoreRequest) (*VectorStoreResponse, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/vector_stores", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		return nil, fmt.Errorf("failed to create vector store, status: '%s', body: '%s'", resp.Status, b)
+	}
+
+	var out VectorStoreResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *Client) WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error {
+	startTime := time.Now()
+	delay := 1 * time.Second // initial delay for exponential backoff
+
+	for {
+		req, err := http.NewRequest(http.MethodGet, c.baseURL+"/vector_stores/"+vectorStoreID, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+		resp, err := c.doWithRetry(req)
+		if err != nil {
+			return fmt.Errorf("failed to send HTTP request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var response VectorStoreResponse
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		fmt.Printf("Vector store response: %+v\n", response)
+
+		if response.Status == "completed" {
+			fmt.Println("Vector store creation completed successfully.")
+			return nil
+		}
+
+		if response.Status == "failed" {
+			return fmt.Errorf("vector store creation failed")
+		}
+
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("timeout reached while waiting for vector store completion")
+		}
+
+		if delay < maxDelay {
+			delay *= 2 // Double the delay for the next attempt
+		}
+
+		fmt.Printf("Waiting for %v before retrying...\n", delay)
+		time.Sleep(delay)
+	}
+}

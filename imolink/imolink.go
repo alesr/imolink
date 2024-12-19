@@ -63,10 +63,11 @@ type (
 		RunThread(ctx context.Context, threadID, assistantID string) (*types.Run, error)
 		GetMessages(ctx context.Context, threadID string) (*types.ThreadMessageList, error)
 		AttachFileToAssistant(ctx context.Context, assistantID, fileID string) error
+		CreateVectorStore(ctx context.Context, in *openaicli.CreateVectorStoreRequest) (*openaicli.VectorStoreResponse, error)
+		WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error
 	}
 
-	NewPropertyEvent struct{ Data string }
-
+	NewPropertyEvent  struct{ Data string }
 	QuestionsInput    struct{ Input []QuestionInput }
 	QuestionInput     struct{ Role, Question string }
 	QuestionOutput    struct{ Answer string }
@@ -120,6 +121,22 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 		return nil, fmt.Errorf("could not upload properties data: %w", err)
 	}
 
+	in := openaicli.CreateVectorStoreRequest{
+		Name:    "properties",
+		FileIDs: []string{fileResp.ID},
+	}
+
+	resp, err := s.client.CreateVectorStore(ctx, &in)
+	if err != nil {
+		return nil, fmt.Errorf("could not create vector store file: %w", err)
+	}
+
+	if resp.Status != "completed" {
+		if err := s.client.WaitForVectorStoreCompletion(ctx, resp.ID, defaultTimeout, 10*time.Second); err != nil {
+			return nil, fmt.Errorf("could not wait for vector store completion: %w", err)
+		}
+	}
+
 	assist, err := s.client.CreateAssistant(ctx, types.AssistantCfg{
 		Name:         "ImoLink",
 		Description:  "Assistente especializado em imóveis em Aracaju",
@@ -129,6 +146,10 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 			{Type: types.ToolTypeFileSearch},
 			{Type: types.ToolTypeCodeInterpreter},
 		},
+		ToolResources: types.ToolResources{
+			CodeInterpreter: &types.CodeInterpreter{FileIDs: []string{fileResp.ID}},
+			FileSearch:      &types.FileSearch{VectorStoreIDs: []string{resp.ID}},
+		},
 		Metadata: types.Meta{
 			"type":    "real_estate_assistant",
 			"region":  "Aracaju",
@@ -137,10 +158,6 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 	})
 	if err != nil {
 		return nil, fmt.Errorf("could not create assistant: %w", err)
-	}
-
-	if err := s.client.AttachFileToAssistant(ctx, assist.ID, fileResp.ID); err != nil {
-		return nil, fmt.Errorf("could not attach file to assistant: %w", err)
 	}
 	return assist, nil
 }

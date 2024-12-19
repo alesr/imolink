@@ -121,19 +121,31 @@ type Function struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-type Tool struct {
-	Type     string    `json:"type"`
-	Function *Function `json:"function,omitempty"`
+type AssistantCfg struct {
+	Metadata      Meta          `json:"metadata,omitempty"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	Model         Model         `json:"model"`
+	Instructions  string        `json:"instructions"`
+	Tools         []Tool        `json:"tools"`
+	ToolResources ToolResources `json:"tool_resources,omitempty"`
 }
 
-type AssistantCfg struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Model        Model    `json:"model"`
-	Instructions string   `json:"instructions"`
-	Tools        []Tool   `json:"tools"`
-	FileIDs      []string `json:"file_ids,omitempty"`
-	Metadata     Meta     `json:"metadata,omitempty"`
+type Tool struct {
+	Type string `json:"type"`
+}
+
+type ToolResources struct {
+	CodeInterpreter *CodeInterpreter `json:"code_interpreter,omitempty"`
+	FileSearch      *FileSearch      `json:"file_search,omitempty"`
+}
+
+type CodeInterpreter struct {
+	FileIDs []string `json:"file_ids"`
+}
+
+type FileSearch struct {
+	VectorStoreIDs []string `json:"vector_store_ids"`
 }
 
 type Assistant struct {

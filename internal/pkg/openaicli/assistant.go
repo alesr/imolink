@@ -34,7 +34,6 @@ func (c *Client) CreateAssistant(ctx context.Context, cfg types.AssistantCfg) (*
 		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 
-	// Set the correct headers for v2
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v2")
@@ -68,11 +67,9 @@ func (c *Client) AddFilesToAssistant(ctx context.Context, assistantID string, fi
 }
 
 func (c *Client) AttachFileToAssistant(ctx context.Context, assistantID, fileID string) error {
-	input := struct {
-		FileID string `json:"file_id"`
-	}{FileID: fileID}
-
-	jsonData, err := json.Marshal(input)
+	jsonData, err := json.Marshal(types.CodeInterpreter{
+		FileIDs: []string{fileID},
+	})
 	if err != nil {
 		return fmt.Errorf("could not marshal file attachment: %w", err)
 	}
