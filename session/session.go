@@ -74,7 +74,13 @@ func (sm *SessionManager) SendMessage(ctx context.Context, db *sqldb.Database, t
 			if currentRun.RequiredAction == nil {
 				return "", fmt.Errorf("invalid state: requires_action but no action specified")
 			}
-			if err := sm.handleFunctionCalling(ctx, db, trelloAPI, session.ThreadID, currentRun); err != nil {
+			if err := sm.handleFunctionCalling(
+				ctx,
+				db,
+				trelloAPI,
+				session.ThreadID,
+				currentRun,
+			); err != nil {
 				return "", fmt.Errorf("could not handle function calling: %w", err)
 			}
 			time.Sleep(1 * time.Second)

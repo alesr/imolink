@@ -194,8 +194,16 @@ func (s *Service) whatsappEventHandler(evt any) {
 				return
 			}
 
+			fmt.Println("Transcription:", string(transcription))
+
 			// Process transcription as a regular message
-			response, err := s.sessionMgr.SendMessage(ctx, db, s.trelloAPI, v.Info.Sender.String(), string(transcription))
+			response, err := s.sessionMgr.SendMessage(
+				ctx,
+				db,
+				s.trelloAPI,
+				v.Info.Sender.String(),
+				string(transcription),
+			)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error processing transcription: %v\n", err)
 				return
@@ -215,7 +223,13 @@ func (s *Service) whatsappEventHandler(evt any) {
 			return
 		}
 
-		response, err := s.sessionMgr.SendMessage(ctx, db, s.trelloAPI, v.Info.Sender.String(), v.Message.GetConversation())
+		response, err := s.sessionMgr.SendMessage(
+			ctx,
+			db,
+			s.trelloAPI,
+			v.Info.Sender.String(),
+			v.Message.GetConversation(),
+		)
 		if err != nil {
 			// Clear typing indicator before returning on error
 			if err := s.whatsappCli.SendChatPresence(
