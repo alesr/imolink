@@ -15,6 +15,7 @@ const (
 	RunStatusCancelled      = "cancelled"
 	RunStatusExpired        = "expired"
 	RunStatusRequiresAction = "requires_action"
+	RunStatusPending        = "pending"
 
 	// Tool types
 	ToolTypeFunction        = "function"
@@ -54,7 +55,8 @@ type (
 	}
 
 	Tool struct {
-		Type string `json:"type"`
+		Type     string              `json:"type"`
+		Function *FunctionDefinition `json:"function,omitempty"`
 	}
 
 	ToolResources struct {
@@ -68,6 +70,12 @@ type (
 
 	FileSearch struct {
 		VectorStoreIDs []string `json:"vector_store_ids"`
+	}
+
+	FunctionDefinition struct {
+		Name        string         `json:"name"`
+		Description string         `json:"description"`
+		Parameters  map[string]any `json:"parameters"`
 	}
 
 	// Vector Store

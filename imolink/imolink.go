@@ -113,6 +113,22 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 		}
 	}
 
+	leadFunction := openaicli.FunctionDefinition{
+		Name:        "lead",
+		Description: "Create a new lead in the system. This function MUST be called when the user provides their name.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "The name of the lead/user",
+					"minLength":   1,
+				},
+			},
+			"required": []string{"name"},
+		},
+	}
+
 	assist, err := s.client.CreateAssistant(ctx, openaicli.CreateAssistantInput{
 		Name:         "ImoLink",
 		Description:  "Assistente especializado em imóveis em Aracaju",
@@ -121,6 +137,10 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 		Tools: []openaicli.Tool{
 			{Type: openaicli.ToolTypeFileSearch},
 			{Type: openaicli.ToolTypeCodeInterpreter},
+			{
+				Type:     openaicli.ToolTypeFunction,
+				Function: &leadFunction,
+			},
 		},
 		ToolResources: openaicli.ToolResources{
 			CodeInterpreter: &openaicli.CodeInterpreter{FileIDs: []string{fileResp.ID}},
