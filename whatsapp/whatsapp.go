@@ -12,7 +12,6 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/openaicli"
-	"encore.app/internal/pkg/openaicli/whisperai"
 	"encore.app/session"
 	"encore.dev/rlog"
 	"encore.dev/storage/sqldb"
@@ -49,6 +48,7 @@ type Service struct {
 	deviceStore *store.Device
 	clientLock  sync.Mutex
 	sessionMgr  *session.SessionManager
+	openAICli   *openaicli.Client
 }
 
 func initService() (*Service, error) {
@@ -58,14 +58,14 @@ func initService() (*Service, error) {
 		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
 	}
 
-	openaiCli := openaicli.New(
+	s.openAICli = openaicli.New(
 		secrets.OpenAIKey,
 		&http.Client{
 			Timeout: assistantInitTimeout,
 		},
 	)
 
-	s.sessionMgr = session.NewSessionManager(imolink.Assistant, openaiCli)
+	s.sessionMgr = session.NewSessionManager(imolink.Assistant, s.openAICli)
 
 	dbLog := walog.Stdout("whatsapp-database", "INFO", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
@@ -177,11 +177,12 @@ func (s *Service) whatsappEventHandler(evt any) {
 				return
 			}
 
-			whisperAICli := whisperai.New(secrets.OpenAIKey)
-			transcription, err := whisperAICli.TranscribeAudio(whisperai.TranscribeAudioInput{
-				Name: "audio.ogg",
-				Data: bytes.NewReader(audioData),
-			})
+			transcription, err := s.openAICli.TranscribeAudio(
+				openaicli.TranscribeAudioInput{
+					Name: "audio.ogg",
+					Data: bytes.NewReader(audioData),
+				},
+			)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "could not transcribe audio: %v\n", err)
 				return

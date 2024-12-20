@@ -1,4 +1,4 @@
-package whisperai
+package openaicli
 
 import (
 	"bytes"
@@ -9,56 +9,36 @@ import (
 )
 
 const (
-	audioTranscriptionURL = "https://api.openai.com/v1/audio/transcriptions"
+	whisperModel = "whisper-1"
 )
 
-// Client is a wrapper around the WhisperAI API
-type Client struct {
-	apiKey string
-	model  string
-}
-
-// New returns a new Client
-func New(apiKey string) *Client {
-	return &Client{
-		apiKey: apiKey,
-		model:  "whisper-1",
-	}
-}
-
-// TranscribeAudioInput is the input for the TranscribeAudio method
-type TranscribeAudioInput struct {
-	Name string
-	Data io.Reader
-}
-
-// TranscribeAudio transcribes the audio from the given input
+// TranscribeAudio transcribes the audio from the given input.
 func (c *Client) TranscribeAudio(in TranscribeAudioInput) ([]byte, error) {
 	body := bytes.Buffer{}
 	writer := multipart.NewWriter(&body)
 
 	part, err := writer.CreateFormFile("file", in.Name)
 	if err != nil {
-		return nil, fmt.Errorf("creating form file: %w", err)
+		return nil, fmt.Errorf("could not create form file: %w", err)
 	}
 
 	if _, err := io.Copy(part, in.Data); err != nil {
-		return nil, fmt.Errorf("copying audio data: %w", err)
+		return nil, fmt.Errorf("could not copy data: %w", err)
 	}
 
-	if err := writer.WriteField("model", c.model); err != nil {
-		return nil, fmt.Errorf("writing model field: %w", err)
+	if err := writer.WriteField("model", whisperModel); err != nil {
+		return nil, fmt.Errorf("could not write model field: %w", err)
 	}
 
 	if err := writer.WriteField("response_format", "text"); err != nil {
-		return nil, fmt.Errorf("writing response format field: %w", err)
+		return nil, fmt.Errorf("could not write response_format field: %w", err)
 	}
 
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("closing writer: %w", err)
+		return nil, fmt.Errorf("could not close writer: %w", err)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, audioTranscriptionURL, &body)
+	request, err := http.NewRequest(http.MethodPost, c.baseURL+"/audio/transcriptions", &body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -66,8 +46,7 @@ func (c *Client) TranscribeAudio(in TranscribeAudioInput) ([]byte, error) {
 	request.Header.Set("Authorization", "Bearer "+c.apiKey)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{}
-	response, err := client.Do(request)
+	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("sending request: %w", err)
 	}

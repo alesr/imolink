@@ -1,5 +1,7 @@
 package openaicli
 
+import "io"
+
 const (
 	AssistantModel Model = "gpt-4o-mini"
 
@@ -94,6 +96,13 @@ type (
 		ExpiresAfter interface{}            `json:"expires_after"`
 		ExpiresAt    interface{}            `json:"expires_at"`
 		LastActiveAt int64                  `json:"last_active_at"`
+	}
+
+	// WhisperAI
+
+	TranscribeAudioInput struct {
+		Name string
+		Data io.Reader
 	}
 
 	// Yet to organize the below types
