@@ -8,9 +8,7 @@ import (
 	"net/http"
 )
 
-const (
-	whisperModel = "whisper-1"
-)
+const whisperModel = "whisper-1"
 
 // TranscribeAudio transcribes the audio from the given input.
 func (c *Client) TranscribeAudio(in TranscribeAudioInput) ([]byte, error) {
