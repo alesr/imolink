@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"encore.app/internal/pkg/openaicli"
+	"encore.app/leads"
 )
 
 type openaiCli interface {
@@ -149,7 +150,29 @@ func (sm *SessionManager) handleFunctionCalling(ctx context.Context, threadID st
 				return fmt.Errorf("could not parse lead arguments: %w", err)
 			}
 
-			if err := CreateLead(ctx, &CreateLeadInput{Name: args.Name}); err != nil {
+			// Find session by threadID
+			var userPhone string
+			sm.mu.RLock()
+			for _, sess := range sm.sessions {
+				if sess.ThreadID == threadID {
+					userPhone = sess.UserID // UserID contains the WhatsApp number
+					break
+				}
+			}
+			sm.mu.RUnlock()
+
+			if userPhone == "" {
+				return fmt.Errorf("no session found for thread %s", threadID)
+			}
+
+			// Clean up the phone number by removing the WhatsApp suffix
+			phone := strings.Split(userPhone, "@")[0] // This will get "306986439311:30" from "306986439311:30@s.whatsapp.net"
+			phone = strings.Split(phone, ":")[0]      // This will get "306986439311" from "306986439311:30"
+
+			if err := leads.CreateLead(ctx, &leads.CreateLeadInput{
+				Name:  args.Name,
+				Phone: phone,
+			}); err != nil {
 				return fmt.Errorf("could not create lead: %w", err)
 			}
 
