@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"encore.app/internal/pkg/openaicli"
+	"encore.app/internal/pkg/trello"
 	"encore.app/leads"
+	"encore.dev/storage/sqldb"
 )
 
 type openaiCli interface {
@@ -38,7 +40,7 @@ func NewSessionManager(assistant *openaicli.Assistant, openaiCli openaiCli) *Ses
 	}
 }
 
-func (sm *SessionManager) SendMessage(ctx context.Context, userID, message string) (string, error) {
+func (sm *SessionManager) SendMessage(ctx context.Context, db *sqldb.Database, trelloAPI *trello.TrelloAPI, userID, message string) (string, error) {
 	session, err := sm.getOrCreateSession(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("could not get or create session: %w", err)
@@ -72,7 +74,7 @@ func (sm *SessionManager) SendMessage(ctx context.Context, userID, message strin
 			if currentRun.RequiredAction == nil {
 				return "", fmt.Errorf("invalid state: requires_action but no action specified")
 			}
-			if err := sm.handleFunctionCalling(ctx, session.ThreadID, currentRun); err != nil {
+			if err := sm.handleFunctionCalling(ctx, db, trelloAPI, session.ThreadID, currentRun); err != nil {
 				return "", fmt.Errorf("could not handle function calling: %w", err)
 			}
 			time.Sleep(1 * time.Second)
@@ -113,7 +115,7 @@ COMPLETED:
 	return finalResponse.String(), nil
 }
 
-func (sm *SessionManager) handleFunctionCalling(ctx context.Context, threadID string, run *openaicli.Run) error {
+func (sm *SessionManager) handleFunctionCalling(ctx context.Context, db *sqldb.Database, trelloAPI *trello.TrelloAPI, threadID string, run *openaicli.Run) error {
 	if run.RequiredAction == nil {
 		return nil
 	}
@@ -169,7 +171,7 @@ func (sm *SessionManager) handleFunctionCalling(ctx context.Context, threadID st
 			phone := strings.Split(userPhone, "@")[0] // This will get "306986439311:30" from "306986439311:30@s.whatsapp.net"
 			phone = strings.Split(phone, ":")[0]      // This will get "306986439311" from "306986439311:30"
 
-			if err := leads.CreateLead(ctx, &leads.CreateLeadInput{
+			if err := leads.CreateLead(ctx, db, trelloAPI, &leads.CreateLeadInput{
 				Name:  args.Name,
 				Phone: phone,
 			}); err != nil {

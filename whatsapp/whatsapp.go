@@ -12,6 +12,7 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/openaicli"
+	"encore.app/internal/pkg/trello"
 	"encore.app/session"
 	"encore.dev/rlog"
 	"encore.dev/storage/sqldb"
@@ -36,7 +37,9 @@ var (
 	})
 
 	secrets struct {
-		OpenAIKey string
+		OpenAIKey    string
+		TrelloAPIKey string
+		TrelloSecret string
 	}
 )
 
@@ -49,6 +52,7 @@ type Service struct {
 	clientLock  sync.Mutex
 	sessionMgr  *session.SessionManager
 	openAICli   *openaicli.Client
+	trelloAPI   *trello.TrelloAPI
 }
 
 func initService() (*Service, error) {
@@ -57,6 +61,8 @@ func initService() (*Service, error) {
 	if err := imolink.InitializeAssistant(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
 	}
+
+	s.trelloAPI = trello.NewTrelloAPI(secrets.TrelloAPIKey, secrets.TrelloSecret)
 
 	s.openAICli = openaicli.New(
 		secrets.OpenAIKey,
@@ -189,7 +195,7 @@ func (s *Service) whatsappEventHandler(evt any) {
 			}
 
 			// Process transcription as a regular message
-			response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), string(transcription))
+			response, err := s.sessionMgr.SendMessage(ctx, db, s.trelloAPI, v.Info.Sender.String(), string(transcription))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error processing transcription: %v\n", err)
 				return
@@ -209,7 +215,7 @@ func (s *Service) whatsappEventHandler(evt any) {
 			return
 		}
 
-		response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), v.Message.GetConversation())
+		response, err := s.sessionMgr.SendMessage(ctx, db, s.trelloAPI, v.Info.Sender.String(), v.Message.GetConversation())
 		if err != nil {
 			// Clear typing indicator before returning on error
 			if err := s.whatsappCli.SendChatPresence(
