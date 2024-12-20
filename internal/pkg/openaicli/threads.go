@@ -72,7 +72,8 @@ func (c *Client) AddMessage(ctx context.Context, in CreateMessageInput) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code: '%d', response: '%s'", resp.StatusCode, string(b))
 	}
 	return nil
 }
