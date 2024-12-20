@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/openaicli"
+	"encore.app/internal/pkg/openaicli/whisperai"
 	"encore.app/session"
 	"encore.dev/rlog"
 	"encore.dev/storage/sqldb"
@@ -26,9 +28,7 @@ import (
 
 const (
 	assistantInitTimeout = 30 * time.Second
-	maxInitRetries       = 3
-	initRetryDelay       = 2 * time.Second
-	messageTimeout       = 2 * time.Minute
+	messageTimeout       = 120 * time.Second
 )
 
 var (
@@ -165,6 +165,48 @@ func (s *Service) whatsappEventHandler(evt any) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), messageTimeout)
 		defer cancel()
+
+		if v.Message.GetAudioMessage() != nil {
+			audioMsg := v.Message.GetAudioMessage()
+
+			audioData, err := s.whatsappCli.DownloadAny(&waE2E.Message{
+				AudioMessage: audioMsg,
+			})
+			if err != nil {
+				rlog.Error("Failed to download audio", "error", err)
+				return
+			}
+
+			whisperAICli := whisperai.New(secrets.OpenAIKey)
+			transcription, err := whisperAICli.TranscribeAudio(whisperai.TranscribeAudioInput{
+				Name: "audio.ogg",
+				Data: bytes.NewReader(audioData),
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "could not transcribe audio: %v\n", err)
+				return
+			}
+
+			// Process transcription as a regular message
+			response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), string(transcription))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error processing transcription: %v\n", err)
+				return
+			}
+
+			cleanSenderJID := stripDeviceSuffix(v.Info.Sender)
+			if _, err := s.whatsappCli.SendMessage(
+				context.Background(),
+				cleanSenderJID,
+				&waE2E.Message{
+					Conversation: &response,
+				},
+			); err != nil {
+				fmt.Fprintf(os.Stderr, "could not send message: %v\n", err)
+				return
+			}
+			return
+		}
 
 		response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), v.Message.GetConversation())
 		if err != nil {
