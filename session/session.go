@@ -1,29 +1,30 @@
-package openaicli
+package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 
-	"encore.app/internal/pkg/openaicli/types"
+	"encore.app/internal/pkg/openaicli"
 )
 
-type Session struct {
-	ThreadID string
-	UserID   string
+type openaiCli interface {
+	AddMessage(ctx context.Context, in openaicli.CreateMessageInput) error
+	RunThread(ctx context.Context, threadID, assistantID string) (*openaicli.Run, error)
+	WaitForRun(ctx context.Context, threadID, runID string) error
+	GetMessages(ctx context.Context, threadID string) (*openaicli.ThreadMessageList, error)
+	CreateThread(ctx context.Context) (*openaicli.Thread, error)
 }
 
 type SessionManager struct {
 	mu        sync.RWMutex
 	sessions  map[string]*Session // key: userID
-	assistant *types.Assistant
-	openaiCli *Client
+	assistant *openaicli.Assistant
+	openaiCli openaiCli
 }
 
-func NewSessionManager(assistant *types.Assistant, openaiCli *Client) *SessionManager {
+func NewSessionManager(assistant *openaicli.Assistant, openaiCli openaiCli) *SessionManager {
 	return &SessionManager{
 		sessions:  make(map[string]*Session),
 		assistant: assistant,
@@ -37,10 +38,10 @@ func (sm *SessionManager) SendMessage(ctx context.Context, userID, message strin
 		return "", fmt.Errorf("failed to get session: %w", err)
 	}
 
-	if err := sm.openaiCli.AddMessage(ctx, types.CreateMessageInput{
+	if err := sm.openaiCli.AddMessage(ctx, openaicli.CreateMessageInput{
 		ThreadID: session.ThreadID,
-		Message: types.ThreadMessage{
-			Role:    types.RoleUser,
+		Message: openaicli.ThreadMessage{
+			Role:    openaicli.RoleUser,
 			Content: message,
 		},
 	}); err != nil {
@@ -93,45 +94,16 @@ func (sm *SessionManager) getOrCreateSession(ctx context.Context, userID string)
 	}
 
 	// Create thread without system message first
-	thread, err := sm.openaiCli.NewThread(ctx)
+	thread, err := sm.openaiCli.CreateThread(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thread: %w", err)
 	}
 
-	session := Session{
+	sess := Session{
 		ThreadID: thread.ID,
 		UserID:   userID,
 	}
-	sm.sessions[userID] = &session
+	sm.sessions[userID] = &sess
 
-	return &session, nil
-}
-
-// Add this new method to get run steps
-func (c *Client) GetRunSteps(ctx context.Context, threadID, runID string) (*types.RunSteps, error) {
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		fmt.Sprintf("%s/threads/%s/runs/%s/steps", c.baseURL, threadID, runID),
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("OpenAI-Beta", "assistants=v2")
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var steps types.RunSteps
-	if err := json.NewDecoder(resp.Body).Decode(&steps); err != nil {
-		return nil, fmt.Errorf("could not decode response: %w", err)
-	}
-
-	return &steps, nil
+	return &sess, nil
 }

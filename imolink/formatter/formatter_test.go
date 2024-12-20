@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"encore.app/domain"
+	"encore.app/properties"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +13,7 @@ func TestFormatProperties(t *testing.T) {
 	builder := "Test Builder"
 	desc := "Test Description"
 
-	props := []*domain.Property{
+	props := []*properties.Property{
 		{
 			Reference:      "REF123",
 			PropertyType:   "Apartment",

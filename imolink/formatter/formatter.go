@@ -3,7 +3,7 @@ package formatter
 import (
 	"encoding/json"
 
-	"encore.app/domain"
+	"encore.app/properties"
 )
 
 type propertyJSON struct {
@@ -34,7 +34,7 @@ type specs struct {
 	NumGarageSpots int     `json:"vagas_garagem"`
 }
 
-func FormatProperties(props []*domain.Property) string {
+func FormatProperties(props []*properties.Property) string {
 	properties := make([]propertyJSON, 0, len(props))
 
 	for _, p := range props {

@@ -11,7 +11,7 @@ import (
 
 	"encore.app/imolink"
 	"encore.app/internal/pkg/openaicli"
-	"encore.dev/metrics"
+	"encore.app/session"
 	"encore.dev/rlog"
 	"encore.dev/storage/sqldb"
 	"github.com/mdp/qrterminal/v3"
@@ -35,9 +35,6 @@ var (
 		Migrations: "./migrations",
 	})
 
-	MessagesReceived = metrics.NewCounter[uint64]("messages_received", metrics.CounterConfig{})
-	MessagesSent     = metrics.NewCounter[uint64]("messages_sent", metrics.CounterConfig{})
-
 	secrets struct {
 		OpenAIKey string
 	}
@@ -50,7 +47,7 @@ type Service struct {
 	whatsappCli *whatsmeow.Client
 	deviceStore *store.Device
 	clientLock  sync.Mutex
-	sessionMgr  *openaicli.SessionManager
+	sessionMgr  *session.SessionManager
 }
 
 func initService() (*Service, error) {
@@ -64,7 +61,7 @@ func initService() (*Service, error) {
 		Timeout: 30 * time.Second,
 	})
 
-	s.sessionMgr = openaicli.NewSessionManager(
+	s.sessionMgr = session.NewSessionManager(
 		imolink.Assistant,
 		openaiCli,
 	)
@@ -176,7 +173,7 @@ func (s *Service) WhatsappReconnect(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "Successfully reconnected to WhatsApp")
 }
 
-func (s *Service) whatsappEventHandler(evt interface{}) {
+func (s *Service) whatsappEventHandler(evt any) {
 	switch v := evt.(type) {
 	case *events.Message:
 		rlog.Debug(
@@ -185,7 +182,6 @@ func (s *Service) whatsappEventHandler(evt interface{}) {
 			"sender", v.Info.Sender,
 			"target", v.Info.Sender.User,
 		)
-		MessagesReceived.Increment()
 
 		if s.sessionMgr == nil {
 			rlog.Error("Session manager not initialized")
@@ -229,7 +225,6 @@ func (s *Service) whatsappEventHandler(evt interface{}) {
 			fmt.Fprintf(os.Stderr, "error sending message: %v\n", err)
 			return
 		}
-		MessagesSent.Increment()
 	}
 }
 

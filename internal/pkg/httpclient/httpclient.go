@@ -1,17 +1,22 @@
 package httpclient
 
 import (
+	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 )
 
-var (
-	defaultDialTimeout = 5 * time.Second
+const (
 	defaultKeepAlive   = 15 * time.Second
 	defaultTLSTimeout  = 5 * time.Second
 	defaultTimeout     = 15 * time.Second
+	defaultDialTimeout = 5 * time.Second
+	maxRetries         = 5
+	baseRetryDelay     = 2 * time.Second
+	maxRetryDelay      = 30 * time.Second
 )
 
 type Option func(*http.Client)
@@ -152,4 +157,36 @@ func New(opts ...Option) *http.Client {
 	}
 
 	return client
+}
+
+// DoWithRetry performs an HTTP request with retries
+func DoWithRetry(client *http.Client, req *http.Request) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err := client.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+		delay := time.Duration(float64(baseRetryDelay) * math.Pow(2, float64(attempt)))
+		if delay > maxRetryDelay {
+			delay = maxRetryDelay
+		}
+
+		select {
+		case <-req.Context().Done():
+			return nil, fmt.Errorf("request cancelled or timed out: %w", req.Context().Err())
+		case <-time.After(delay):
+			continue
+		}
+	}
+	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+}
+
+func isTemporaryError(err error) bool {
+	if netErr, ok := err.(net.Error); ok {
+		return netErr.Timeout()
+	}
+	return true
 }

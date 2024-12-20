@@ -1,4 +1,4 @@
-package app
+package imolink
 
 import (
 	"encoding/base64"
@@ -8,7 +8,7 @@ import (
 
 	"math/rand"
 
-	"encore.app/domain"
+	"encore.app/properties"
 )
 
 func strPtr(s string) *string {
@@ -33,7 +33,7 @@ type propertyTemplate struct {
 	description string
 }
 
-func getSampleProperties() ([]*domain.Property, error) {
+func getSampleProperties() ([]*properties.Property, error) {
 	now := time.Now()
 	templates := []propertyTemplate{
 		{
@@ -191,7 +191,7 @@ func getSampleProperties() ([]*domain.Property, error) {
 		},
 	}
 
-	properties := make([]*domain.Property, 0, len(templates))
+	props := make([]*properties.Property, 0, len(templates))
 
 	for _, t := range templates {
 		photo, blueprint, err := getPhotoAndBlueprint(t.propType)
@@ -199,7 +199,7 @@ func getSampleProperties() ([]*domain.Property, error) {
 			return nil, fmt.Errorf("could not get photo and blueprint for %s: %w", t.name, err)
 		}
 
-		prop := &domain.Property{
+		prop := &properties.Property{
 			Name:                t.name,
 			Area:                t.area,
 			NumBedrooms:         t.bedrooms,
@@ -226,9 +226,9 @@ func getSampleProperties() ([]*domain.Property, error) {
 			CreatedAt:           now,
 			UpdatedAt:           now,
 		}
-		properties = append(properties, prop)
+		props = append(props, prop)
 	}
-	return properties, nil
+	return props, nil
 }
 
 func getPhotoAndBlueprint(propType string) (string, string, error) {

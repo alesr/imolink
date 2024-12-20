@@ -1,9 +1,8 @@
 package imolink
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"embed"
 	"fmt"
 	"io"
 	"strings"
@@ -14,64 +13,34 @@ import (
 	"encore.app/internal/pkg/apierror"
 	"encore.app/internal/pkg/httpclient"
 	"encore.app/internal/pkg/openaicli"
-	"encore.app/internal/pkg/openaicli/types"
 	"encore.app/properties"
 	"encore.dev/beta/errs"
-	"encore.dev/metrics"
-	"encore.dev/pubsub"
 )
 
 var (
-	// Encore metric collectors
-	QuestionsProcessed = metrics.NewCounter[uint64]("questions_processed", metrics.CounterConfig{})
-	DataTrained        = metrics.NewCounter[uint64]("data_trained", metrics.CounterConfig{})
-
-	NewPropertiesTopic = pubsub.NewTopic[*NewPropertyEvent]("new-property", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
-
-	_ = pubsub.NewSubscription(
-		NewPropertiesTopic,
-		"new-property",
-		pubsub.SubscriptionConfig[*NewPropertyEvent]{
-			Handler: train,
-		},
-	)
-
 	secrets struct {
 		OpenAIKey string
 	}
 )
 
 const (
-	defaultTimeout     = 180 * time.Second
-	defaultDialTimeout = 30 * time.Second
-	defaultTLSTimeout  = 20 * time.Second
-	defaultKeepAlive   = 90 * time.Second
+	defaultTimeout = 180 * time.Second
 )
 
 var (
-	Assistant *types.Assistant
+	Assistant *openaicli.Assistant
+
+	//go:embed assets/*
+	assetsFS embed.FS
 )
 
 type (
 	openAIClient interface {
-		CreateAssistant(ctx context.Context, cfg types.AssistantCfg) (*types.Assistant, error)
-		NewThread(ctx context.Context) (*types.Thread, error)
-		UploadFile(ctx context.Context, data io.Reader, purpose string) (*types.FileUploadResponse, error)
-		AddMessage(ctx context.Context, in types.CreateMessageInput) error
-		RunThread(ctx context.Context, threadID, assistantID string) (*types.Run, error)
-		GetMessages(ctx context.Context, threadID string) (*types.ThreadMessageList, error)
-		AttachFileToAssistant(ctx context.Context, assistantID, fileID string) error
-		CreateVectorStore(ctx context.Context, in *openaicli.CreateVectorStoreRequest) (*openaicli.VectorStoreResponse, error)
+		UploadFile(ctx context.Context, data io.Reader, purpose string) (*openaicli.FileUploadResponse, error)
+		CreateVectorStore(ctx context.Context, in *openaicli.CreateVectorStoreInput) (*openaicli.VectorStore, error)
 		WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error
+		CreateAssistant(ctx context.Context, cfg openaicli.CreateAssistantInput) (*openaicli.Assistant, error)
 	}
-
-	NewPropertyEvent  struct{ Data string }
-	QuestionsInput    struct{ Input []QuestionInput }
-	QuestionInput     struct{ Role, Question string }
-	QuestionOutput    struct{ Answer string }
-	TrainingDataInput struct{ Data []string }
 )
 
 //encore:service
@@ -104,7 +73,10 @@ func (s *Service) InitializeAssistant(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types.Assistant, error) {
+func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*openaicli.Assistant, error) {
+	// We fetch the properties from the db and  upload the data
+	// to openai so that we can use it with the code interpreter tool.
+
 	props, err := properties.List(ctx, properties.ListInput{})
 	if err != nil {
 		return nil, fmt.Errorf("could not list properties: %w", err)
@@ -114,19 +86,23 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 		return nil, fmt.Errorf("no properties available in the database")
 	}
 
-	data := formatter.FormatProperties(props.Properties)
-
-	fileResp, err := s.client.UploadFile(ctx, strings.NewReader(data), "assistants")
+	fileResp, err := s.client.UploadFile(
+		ctx,
+		strings.NewReader(
+			formatter.FormatProperties(props.Properties),
+		),
+		"assistants",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("could not upload properties data: %w", err)
 	}
 
-	in := openaicli.CreateVectorStoreRequest{
+	// Once we have the file uploaded, we create a vector store.
+
+	resp, err := s.client.CreateVectorStore(ctx, &openaicli.CreateVectorStoreInput{
 		Name:    "properties",
 		FileIDs: []string{fileResp.ID},
-	}
-
-	resp, err := s.client.CreateVectorStore(ctx, &in)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("could not create vector store file: %w", err)
 	}
@@ -137,20 +113,20 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 		}
 	}
 
-	assist, err := s.client.CreateAssistant(ctx, types.AssistantCfg{
+	assist, err := s.client.CreateAssistant(ctx, openaicli.CreateAssistantInput{
 		Name:         "ImoLink",
 		Description:  "Assistente especializado em imóveis em Aracaju",
-		Model:        types.AssistantModel,
+		Model:        openaicli.AssistantModel,
 		Instructions: assistantInstructions,
-		Tools: []types.Tool{
-			{Type: types.ToolTypeFileSearch},
-			{Type: types.ToolTypeCodeInterpreter},
+		Tools: []openaicli.Tool{
+			{Type: openaicli.ToolTypeFileSearch},
+			{Type: openaicli.ToolTypeCodeInterpreter},
 		},
-		ToolResources: types.ToolResources{
-			CodeInterpreter: &types.CodeInterpreter{FileIDs: []string{fileResp.ID}},
-			FileSearch:      &types.FileSearch{VectorStoreIDs: []string{resp.ID}},
+		ToolResources: openaicli.ToolResources{
+			CodeInterpreter: &openaicli.CodeInterpreter{FileIDs: []string{fileResp.ID}},
+			FileSearch:      &openaicli.FileSearch{VectorStoreIDs: []string{resp.ID}},
 		},
-		Metadata: types.Meta{
+		Metadata: openaicli.Meta{
 			"type":    "real_estate_assistant",
 			"region":  "Aracaju",
 			"version": "1.0",
@@ -160,39 +136,4 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*types
 		return nil, fmt.Errorf("could not create assistant: %w", err)
 	}
 	return assist, nil
-}
-
-//encore:api public method=POST path=/imolink/training-data
-func (s *Service) AddTrainingData(ctx context.Context, in TrainingDataInput) error {
-	s.mu.RLock()
-	assistant := Assistant
-	s.mu.RUnlock()
-
-	if assistant == nil {
-		return apierror.E("assistant not initialized", nil, errs.Internal)
-	}
-
-	jsonData, err := json.Marshal(in.Data)
-	if err != nil {
-		return apierror.E("invalid json string", err, errs.InvalidArgument)
-	}
-
-	resp, err := s.client.UploadFile(ctx, bytes.NewReader(jsonData), "assistants")
-	if err != nil {
-		return apierror.E("could not upload file", err, errs.Internal)
-	}
-
-	if err := s.client.AttachFileToAssistant(ctx, assistant.ID, resp.ID); err != nil {
-		return apierror.E("could not attach file to assistant", err, errs.Internal)
-	}
-
-	DataTrained.Increment()
-	return nil
-}
-
-func train(ctx context.Context, q *NewPropertyEvent) error {
-	if err := AddTrainingData(ctx, TrainingDataInput{Data: []string{q.Data}}); err != nil {
-		return fmt.Errorf("could not ask: %w", err)
-	}
-	return nil
 }

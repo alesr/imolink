@@ -9,11 +9,16 @@ import (
 	"net/http"
 	"time"
 
-	"encore.app/internal/pkg/openaicli/types"
+	"encore.app/internal/pkg/httpclient"
 )
 
-func (c *Client) NewThread(ctx context.Context) (*types.Thread, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/threads", c.baseURL), bytes.NewBuffer([]byte("{}")))
+func (c *Client) CreateThread(ctx context.Context) (*Thread, error) {
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		fmt.Sprintf("%s/threads", c.baseURL),
+		bytes.NewBuffer([]byte("{}")),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %w", err)
 	}
@@ -22,24 +27,25 @@ func (c *Client) NewThread(ctx context.Context) (*types.Thread, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
-	resp, err := c.doWithRetry(req)
+	resp, err := httpclient.DoWithRetry(c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("could not send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: '%d', response: '%s'", resp.StatusCode, string(b))
 	}
 
-	var thread types.Thread
+	var thread Thread
 	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
 		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
 	return &thread, nil
 }
 
-func (c *Client) AddMessage(ctx context.Context, in types.CreateMessageInput) error {
+func (c *Client) AddMessage(ctx context.Context, in CreateMessageInput) error {
 	jsonData, err := json.Marshal(in.Message)
 	if err != nil {
 		return fmt.Errorf("could not marshal message: %w", err)
@@ -71,7 +77,7 @@ func (c *Client) AddMessage(ctx context.Context, in types.CreateMessageInput) er
 	return nil
 }
 
-func (c *Client) GetMessages(ctx context.Context, threadID string) (*types.ThreadMessageList, error) {
+func (c *Client) GetMessages(ctx context.Context, threadID string) (*ThreadMessageList, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -95,14 +101,14 @@ func (c *Client) GetMessages(ctx context.Context, threadID string) (*types.Threa
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	var messages types.ThreadMessageList
+	var messages ThreadMessageList
 	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
 		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
 	return &messages, nil
 }
 
-func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*types.Run, error) {
+func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*Run, error) {
 	jsonData, err := json.Marshal(struct {
 		AssistantID string `json:"assistant_id"`
 	}{
@@ -126,7 +132,7 @@ func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
-	resp, err := c.doWithRetry(req)
+	resp, err := httpclient.DoWithRetry(c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("could not send request: %w", err)
 	}
@@ -137,7 +143,7 @@ func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(responseBody))
 	}
 
-	var run types.Run
+	var run Run
 	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
 		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
@@ -145,9 +151,9 @@ func (c *Client) RunThread(ctx context.Context, threadID, assistantID string) (*
 }
 
 // Add this new method to handle tool outputs
-func (c *Client) SubmitToolOutputs(ctx context.Context, threadID string, runID string, outputs []types.ToolOutput) error {
+func (c *Client) SubmitToolOutputs(ctx context.Context, threadID string, runID string, outputs []ToolOutput) error {
 	input := struct {
-		ToolOutputs []types.ToolOutput `json:"tool_outputs"`
+		ToolOutputs []ToolOutput `json:"tool_outputs"`
 	}{
 		ToolOutputs: outputs,
 	}
@@ -171,7 +177,7 @@ func (c *Client) SubmitToolOutputs(ctx context.Context, threadID string, runID s
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
-	resp, err := c.doWithRetry(req)
+	resp, err := httpclient.DoWithRetry(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("could not send request: %w", err)
 	}
@@ -185,7 +191,7 @@ func (c *Client) SubmitToolOutputs(ctx context.Context, threadID string, runID s
 	return nil
 }
 
-func (c *Client) GetRun(ctx context.Context, threadID, runID string) (*types.Run, error) {
+func (c *Client) GetRun(ctx context.Context, threadID, runID string) (*Run, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -199,13 +205,13 @@ func (c *Client) GetRun(ctx context.Context, threadID, runID string) (*types.Run
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v2")
 
-	resp, err := c.doWithRetry(req)
+	resp, err := httpclient.DoWithRetry(c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("could not send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var run types.Run
+	var run Run
 	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
 		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
@@ -224,16 +230,16 @@ func (c *Client) WaitForRun(ctx context.Context, threadID, runID string) error {
 			}
 
 			switch run.Status {
-			case types.RunStatusCompleted:
+			case RunStatusCompleted:
 				return nil
-			case types.RunStatusFailed:
+			case RunStatusFailed:
 				if run.LastError != nil {
 					return fmt.Errorf("run failed: %s - %s", run.LastError.Code, run.LastError.Message)
 				}
 				return fmt.Errorf("run failed without error details")
-			case types.RunStatusCancelled, types.RunStatusExpired:
+			case RunStatusCancelled, RunStatusExpired:
 				return fmt.Errorf("run ended with status: %s", run.Status)
-			case types.RunStatusQueued, types.RunStatusInProgress:
+			case RunStatusQueued, RunStatusInProgress:
 				time.Sleep(time.Second)
 				continue
 			default:
