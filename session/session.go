@@ -35,7 +35,7 @@ func NewSessionManager(assistant *openaicli.Assistant, openaiCli openaiCli) *Ses
 func (sm *SessionManager) SendMessage(ctx context.Context, userID, message string) (string, error) {
 	session, err := sm.getOrCreateSession(ctx, userID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get session: %w", err)
+		return "", fmt.Errorf("could not get or create session: %w", err)
 	}
 
 	if err := sm.openaiCli.AddMessage(ctx, openaicli.CreateMessageInput{
@@ -45,12 +45,12 @@ func (sm *SessionManager) SendMessage(ctx context.Context, userID, message strin
 			Content: message,
 		},
 	}); err != nil {
-		return "", fmt.Errorf("failed to add message: %w", err)
+		return "", fmt.Errorf("could not add message: %w", err)
 	}
 
 	run, err := sm.openaiCli.RunThread(ctx, session.ThreadID, sm.assistant.ID)
 	if err != nil {
-		return "", fmt.Errorf("failed to run thread: %w", err)
+		return "", fmt.Errorf("could not run thread: %w", err)
 	}
 
 	for {
@@ -58,13 +58,13 @@ func (sm *SessionManager) SendMessage(ctx context.Context, userID, message strin
 		if err == nil {
 			break // Run completed successfully
 		}
-		return "", fmt.Errorf("failed to wait for run: %w", err)
+		return "", fmt.Errorf("could not wait for run: %w", err)
 	}
 
 	// Get final response
 	messages, err := sm.openaiCli.GetMessages(ctx, session.ThreadID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get messages: %w", err)
+		return "", fmt.Errorf("could not get messages: %w", err)
 	}
 
 	var finalResponse strings.Builder
@@ -96,7 +96,7 @@ func (sm *SessionManager) getOrCreateSession(ctx context.Context, userID string)
 	// Create thread without system message first
 	thread, err := sm.openaiCli.CreateThread(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create thread: %w", err)
+		return nil, fmt.Errorf("could not create thread: %w", err)
 	}
 
 	sess := Session{

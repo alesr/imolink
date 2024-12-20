@@ -25,9 +25,10 @@ import (
 )
 
 const (
-	maxInitRetries = 3
-	initRetryDelay = 2 * time.Second
-	messageTimeout = 2 * time.Minute
+	assistantInitTimeout = 30 * time.Second
+	maxInitRetries       = 3
+	initRetryDelay       = 2 * time.Second
+	messageTimeout       = 2 * time.Minute
 )
 
 var (
@@ -57,14 +58,14 @@ func initService() (*Service, error) {
 		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
 	}
 
-	openaiCli := openaicli.New(secrets.OpenAIKey, &http.Client{
-		Timeout: 30 * time.Second,
-	})
-
-	s.sessionMgr = session.NewSessionManager(
-		imolink.Assistant,
-		openaiCli,
+	openaiCli := openaicli.New(
+		secrets.OpenAIKey,
+		&http.Client{
+			Timeout: assistantInitTimeout,
+		},
 	)
+
+	s.sessionMgr = session.NewSessionManager(imolink.Assistant, openaiCli)
 
 	dbLog := walog.Stdout("whatsapp-database", "INFO", true)
 	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
@@ -74,12 +75,12 @@ func initService() (*Service, error) {
 		if strings.Contains(err.Error(), "no devices found") {
 			return s, nil
 		}
-		return nil, fmt.Errorf("failed to get WhatsApp device: %w", err)
+		return nil, fmt.Errorf("could not get WhatsApp device: %w", err)
 	}
 
 	if deviceStore != nil {
 		if err := s.connectToWhatsApp(deviceStore); err != nil {
-			return nil, fmt.Errorf("failed to reconnect to WhatsApp: %w", err)
+			return nil, fmt.Errorf("could not connect to WhatsApp: %w", err)
 		}
 	}
 	s.deviceStore = deviceStore
@@ -141,38 +142,6 @@ func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-//encore:api auth raw path=/whatsapp/reconnect
-func (s *Service) WhatsappReconnect(w http.ResponseWriter, req *http.Request) {
-	s.clientLock.Lock()
-	defer s.clientLock.Unlock()
-
-	if s.whatsappCli != nil {
-		s.whatsappCli.Disconnect()
-	}
-
-	dbLog := walog.Stdout("Database", "DEBUG", true)
-	container := sqlstore.NewWithDB(db.Stdlib(), "postgres", dbLog)
-
-	deviceStore, err := container.GetFirstDevice()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("No device found: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	clientLog := walog.Stdout("Client", "DEBUG", true)
-	client := whatsmeow.NewClient(deviceStore, clientLog)
-	client.AddEventHandler(s.whatsappEventHandler)
-
-	s.whatsappCli = client
-	s.deviceStore = deviceStore
-
-	if err := client.Connect(); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to reconnect: %v", err), http.StatusInternalServerError)
-		return
-	}
-	fmt.Fprintf(w, "Successfully reconnected to WhatsApp")
-}
-
 func (s *Service) whatsappEventHandler(evt any) {
 	switch v := evt.(type) {
 	case *events.Message:
@@ -200,7 +169,13 @@ func (s *Service) whatsappEventHandler(evt any) {
 		response, err := s.sessionMgr.SendMessage(ctx, v.Info.Sender.String(), v.Message.GetConversation())
 		if err != nil {
 			// Clear typing indicator before returning on error
-			_ = s.whatsappCli.SendChatPresence(cleanJID, types.ChatPresencePaused, types.ChatPresenceMediaText)
+			if err := s.whatsappCli.SendChatPresence(
+				cleanJID,
+				types.ChatPresencePaused,
+				types.ChatPresenceMediaText,
+			); err != nil {
+				fmt.Fprintf(os.Stderr, "could not clear chat presence: %v\n", err)
+			}
 			fmt.Fprintf(os.Stderr, "error processing message: %v\n", err)
 			return
 		}
@@ -211,7 +186,7 @@ func (s *Service) whatsappEventHandler(evt any) {
 			types.ChatPresencePaused,
 			types.ChatPresenceMediaText,
 		); err != nil {
-			fmt.Fprintf(os.Stderr, "error clearing chat presence: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not clear chat presence: %v\n", err)
 		}
 
 		cleanSenderJID := stripDeviceSuffix(v.Info.Sender)
@@ -222,7 +197,7 @@ func (s *Service) whatsappEventHandler(evt any) {
 				Conversation: &response,
 			},
 		); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending message: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not send message: %v\n", err)
 			return
 		}
 	}
@@ -241,7 +216,7 @@ func (s *Service) connectToWhatsApp(deviceStore *store.Device) error {
 	s.deviceStore = deviceStore
 
 	if err := client.Connect(); err != nil {
-		return fmt.Errorf("failed to connect WhatsApp client: %w", err)
+		return fmt.Errorf("could not connect to WhatsApp: %w", err)
 	}
 	return nil
 }
