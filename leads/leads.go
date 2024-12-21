@@ -22,21 +22,25 @@ func CreateLead(ctx context.Context, db *sqldb.Database, trelloAPI *trello.Trell
 		return fmt.Errorf("could not generate ID: %w", err)
 	}
 
-	if _, err = db.Exec(ctx, `
-        INSERT INTO leads (id, name, phone)
-        VALUES ($1, $2, $3)
-    `, id, input.Name, input.Phone); err != nil {
-		return fmt.Errorf("failed to insert lead: %w", err)
-	}
+	go func() {
+		if _, err := db.Exec(context.Background(), `
+			INSERT INTO leads (id, name, phone)
+			VALUES ($1, $2, $3)
+		`, id, input.Name, input.Phone); err != nil {
+			fmt.Printf("Error inserting lead: %v\n", err)
+			return
+		}
 
-	if err := trelloAPI.CreateCard(trello.TrelloCard{
-		Name:        input.Name,
-		Description: fmt.Sprintf("Phone: %s", input.Phone),
-		ListID:      newLeadsTrelloLane,
-	}); err != nil {
-		return fmt.Errorf("failed to create card: %w", err)
-	}
+		if err := trelloAPI.CreateCard(trello.TrelloCard{
+			Name:        input.Name,
+			Description: fmt.Sprintf("Phone: %s", input.Phone),
+			ListID:      newLeadsTrelloLane,
+		}); err != nil {
+			fmt.Printf("Error creating Trello card: %v\n", err)
+			return
+		}
 
-	fmt.Printf("Created lead - ID: %s, Name: %s, Phone: %s\n", id, input.Name, input.Phone)
+		fmt.Printf("Created lead - ID: %s, Name: %s, Phone: %s\n", id, input.Name, input.Phone)
+	}()
 	return nil
 }
