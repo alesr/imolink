@@ -11,7 +11,7 @@ import (
 	"encore.app/internal/pkg/httpclient"
 )
 
-func (c *Client) CreateAssistant(ctx context.Context, in CreateAssistantInput) (*Assistant, error) {
+func (c *Client) CreateAssistant(ctx context.Context, in *CreateAssistantInput) (*Assistant, error) {
 	jsonData, err := json.Marshal(in)
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal assistant config: %w", err)

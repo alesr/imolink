@@ -17,21 +17,17 @@ import (
 	"encore.dev/beta/errs"
 )
 
-var (
-	secrets struct {
-		OpenAIKey string
-	}
-)
-
-const (
-	defaultTimeout = 180 * time.Second
-)
+const defaultTimeout = time.Minute
 
 var (
 	Assistant *openaicli.Assistant
 
 	//go:embed assets/*
 	assetsFS embed.FS
+
+	secrets struct {
+		OpenAIKey string
+	}
 )
 
 type (
@@ -39,7 +35,7 @@ type (
 		UploadFile(ctx context.Context, data io.Reader, purpose string) (*openaicli.FileUploadResponse, error)
 		CreateVectorStore(ctx context.Context, in *openaicli.CreateVectorStoreInput) (*openaicli.VectorStore, error)
 		WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error
-		CreateAssistant(ctx context.Context, cfg openaicli.CreateAssistantInput) (*openaicli.Assistant, error)
+		CreateAssistant(ctx context.Context, cfg *openaicli.CreateAssistantInput) (*openaicli.Assistant, error)
 	}
 )
 
@@ -86,7 +82,7 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 		return nil, fmt.Errorf("no properties available in the database")
 	}
 
-	fileResp, err := s.client.UploadFile(
+	uploadedFile, err := s.client.UploadFile(
 		ctx,
 		strings.NewReader(
 			formatter.FormatProperties(props.Properties),
@@ -99,21 +95,62 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 
 	// Once we have the file uploaded, we create a vector store.
 
-	resp, err := s.client.CreateVectorStore(ctx, &openaicli.CreateVectorStoreInput{
-		Name:    "properties",
-		FileIDs: []string{fileResp.ID},
-	})
+	vectorStore, err := s.client.CreateVectorStore(ctx,
+		&openaicli.CreateVectorStoreInput{
+			Name:    "properties",
+			FileIDs: []string{uploadedFile.ID},
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("could not create vector store file: %w", err)
 	}
 
-	if resp.Status != "completed" {
-		if err := s.client.WaitForVectorStoreCompletion(ctx, resp.ID, defaultTimeout, 10*time.Second); err != nil {
+	if vectorStore.Status != "completed" {
+		if err := s.client.WaitForVectorStoreCompletion(
+			ctx,
+			vectorStore.ID,
+			defaultTimeout,
+			10*time.Second,
+		); err != nil {
 			return nil, fmt.Errorf("could not wait for vector store completion: %w", err)
 		}
 	}
 
-	leadFunction := openaicli.FunctionDefinition{
+	assist, err := s.client.CreateAssistant(ctx, assistantCfg(uploadedFile.ID, vectorStore.ID))
+	if err != nil {
+		return nil, fmt.Errorf("could not create assistant: %w", err)
+	}
+	return assist, nil
+}
+
+func assistantCfg(fileID, vectorStoreID string) *openaicli.CreateAssistantInput {
+	return &openaicli.CreateAssistantInput{
+		Name:         "ImoLink",
+		Description:  "Assistente especializado em imóveis em Aracaju",
+		Model:        openaicli.AssistantModel,
+		Instructions: assistantInstructions,
+		Tools: []openaicli.Tool{
+			{Type: openaicli.ToolTypeFileSearch},
+			{Type: openaicli.ToolTypeCodeInterpreter},
+			{
+				Type:     openaicli.ToolTypeFunction,
+				Function: leadFunctionDefinition(),
+			},
+		},
+		ToolResources: openaicli.ToolResources{
+			CodeInterpreter: &openaicli.CodeInterpreter{FileIDs: []string{fileID}},
+			FileSearch:      &openaicli.FileSearch{VectorStoreIDs: []string{vectorStoreID}},
+		},
+		Metadata: openaicli.Meta{
+			"type":    "real_estate_assistant",
+			"region":  "Aracaju",
+			"version": "1.0",
+		},
+	}
+}
+
+func leadFunctionDefinition() *openaicli.FunctionDefinition {
+	return &openaicli.FunctionDefinition{
 		Name:        "lead",
 		Description: "Create a new lead in the system. This function MUST be called when the user provides their name.",
 		Parameters: map[string]any{
@@ -128,32 +165,4 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 			"required": []string{"name"},
 		},
 	}
-
-	assist, err := s.client.CreateAssistant(ctx, openaicli.CreateAssistantInput{
-		Name:         "ImoLink",
-		Description:  "Assistente especializado em imóveis em Aracaju",
-		Model:        openaicli.AssistantModel,
-		Instructions: assistantInstructions,
-		Tools: []openaicli.Tool{
-			{Type: openaicli.ToolTypeFileSearch},
-			{Type: openaicli.ToolTypeCodeInterpreter},
-			{
-				Type:     openaicli.ToolTypeFunction,
-				Function: &leadFunction,
-			},
-		},
-		ToolResources: openaicli.ToolResources{
-			CodeInterpreter: &openaicli.CodeInterpreter{FileIDs: []string{fileResp.ID}},
-			FileSearch:      &openaicli.FileSearch{VectorStoreIDs: []string{resp.ID}},
-		},
-		Metadata: openaicli.Meta{
-			"type":    "real_estate_assistant",
-			"region":  "Aracaju",
-			"version": "1.0",
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("could not create assistant: %w", err)
-	}
-	return assist, nil
 }
