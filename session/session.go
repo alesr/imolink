@@ -96,54 +96,56 @@ func (sm *SessionManager) SendMessage(ctx context.Context, db *sqldb.Database, t
 		return "", fmt.Errorf("could not run thread: %w", err)
 	}
 
+	if err := sm.processRun(ctx, db, trelloAPI, session.ThreadID, run.ID); err != nil {
+		return "", err
+	}
+	return sm.getAssistantResponse(ctx, session.ThreadID)
+}
+
+func (sm *SessionManager) processRun(ctx context.Context, db *sqldb.Database, trelloAPI *trello.TrelloAPI, threadID, runID string) error {
 	for {
-		currentRun, err := sm.openaiCli.GetRun(ctx, session.ThreadID, run.ID)
+		currentRun, err := sm.openaiCli.GetRun(ctx, threadID, runID)
 		if err != nil {
-			return "", fmt.Errorf("could not get run status: %w", err)
+			return fmt.Errorf("could not get run status: %w", err)
 		}
 
 		switch currentRun.Status {
 		case openaicli.RunStatusCompleted:
-			goto COMPLETED
+			return nil
 		case openaicli.RunStatusRequiresAction:
 			if currentRun.RequiredAction == nil {
-				return "", fmt.Errorf("invalid state: requires_action but no action specified")
+				return fmt.Errorf("invalid state: requires_action but no action specified")
 			}
-			if err := sm.handleFunctionCalling(
-				ctx,
-				db,
-				trelloAPI,
-				session.ThreadID,
-				currentRun,
-			); err != nil {
-				return "", fmt.Errorf("could not handle function calling: %w", err)
+			if err := sm.handleFunctionCalling(ctx, db, trelloAPI, threadID, currentRun); err != nil {
+				return fmt.Errorf("could not handle function calling: %w", err)
 			}
 			time.Sleep(1 * time.Second)
 		case openaicli.RunStatusFailed, openaicli.RunStatusCancelled, openaicli.RunStatusExpired:
-			return "", fmt.Errorf("run failed with status: %s and error: %v", currentRun.Status, currentRun.LastError)
+			return fmt.Errorf("run failed with status: %s and error: %v", currentRun.Status, currentRun.LastError)
 		}
 
 		if currentRun.Status != openaicli.RunStatusCompleted {
-			if err := sm.openaiCli.WaitForRun(ctx, session.ThreadID, run.ID); err != nil {
+			if err := sm.openaiCli.WaitForRun(ctx, threadID, runID); err != nil {
 				if strings.Contains(err.Error(), "requires_action") {
 					continue
 				}
-				return "", fmt.Errorf("could not wait for run: %w", err)
+				return fmt.Errorf("could not wait for run: %w", err)
 			}
 		}
 	}
+}
 
-COMPLETED:
-	messages, err := sm.openaiCli.GetMessages(ctx, session.ThreadID)
+func (sm *SessionManager) getAssistantResponse(ctx context.Context, threadID string) (string, error) {
+	messages, err := sm.openaiCli.GetMessages(ctx, threadID)
 	if err != nil {
 		return "", fmt.Errorf("could not get messages: %w", err)
 	}
 
-	var finalResponse strings.Builder
 	if len(messages.Data) == 0 {
 		return "", fmt.Errorf("no messages returned")
 	}
 
+	var finalResponse strings.Builder
 	mostRecentMsg := messages.Data[0]
 	if mostRecentMsg.Role == roleAssistant && len(mostRecentMsg.Content) > 0 {
 		for _, content := range mostRecentMsg.Content {
@@ -208,13 +210,10 @@ func (sm *SessionManager) handleFunctionCalling(ctx context.Context, db *sqldb.D
 				return fmt.Errorf("no session found for thread %s", threadID)
 			}
 
-			// Clean up the phone number by removing the WhatsApp suffix
-			phone := strings.Split(userPhone, "@")[0] // This will get "306986439311:30" from "306986439311:30@s.whatsapp.net"
-			phone = strings.Split(phone, ":")[0]      // This will get "306986439311" from "306986439311:30"
-
 			if err := leads.CreateLead(ctx, db, trelloAPI, &leads.CreateLeadInput{
-				Name:  args.Name,
-				Phone: phone,
+				Name: args.Name,
+				// Clean up the phone number by removing the WhatsApp suffix.
+				Phone: strings.Split(strings.Split(userPhone, "@")[0], ":")[0],
 			}); err != nil {
 				return fmt.Errorf("could not create lead: %w", err)
 			}
@@ -231,7 +230,6 @@ func (sm *SessionManager) handleFunctionCalling(ctx context.Context, db *sqldb.D
 			return fmt.Errorf("could not submit tool outputs: %w", err)
 		}
 	}
-
 	return nil
 }
 
