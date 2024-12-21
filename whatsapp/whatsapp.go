@@ -39,7 +39,7 @@ var (
 	secrets struct {
 		OpenAIKey    string
 		TrelloAPIKey string
-		TrelloSecret string
+		TrelloToken  string
 	}
 )
 
@@ -62,7 +62,7 @@ func initService() (*Service, error) {
 		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
 	}
 
-	s.trelloAPI = trello.NewTrelloAPI(secrets.TrelloAPIKey, secrets.TrelloSecret)
+	s.trelloAPI = trello.NewTrelloAPI(secrets.TrelloAPIKey, secrets.TrelloToken)
 
 	s.openAICli = openaicli.New(
 		secrets.OpenAIKey,
