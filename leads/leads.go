@@ -4,13 +4,17 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"encore.app/internal/pkg/idutil"
 	"encore.app/internal/pkg/trello"
 	"encore.dev/storage/sqldb"
 )
 
-const newLeadsTrelloLane = "6765c8d942977be5554e82d8"
+const (
+	newLeadsTrelloLane = "6765c8d942977be5554e82d8"
+	brLocation         = "America/Sao_Paulo"
+)
 
 type CreateLeadInput struct {
 	Name  string
@@ -32,9 +36,22 @@ func CreateLead(ctx context.Context, db *sqldb.Database, trelloAPI *trello.Trell
 			return
 		}
 
+		loc, err := time.LoadLocation(brLocation)
+		if err != nil {
+			loc = time.UTC
+		}
+
+		now := time.Now().In(loc)
+		description := fmt.Sprintf(
+			"Nome: %s\nTelefone: %s\nCriado em: %s",
+			input.Name,
+			input.Phone,
+			now.Format("02/01/2006 às 15:04"),
+		)
+
 		if err := trelloAPI.CreateCard(trello.TrelloCard{
 			Name:        input.Name,
-			Description: fmt.Sprintf("Phone: %s", input.Phone),
+			Description: description,
 			ListID:      newLeadsTrelloLane,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "could not create Trello card: %v\n", err)
