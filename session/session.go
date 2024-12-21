@@ -81,6 +81,11 @@ func (sm *SessionManager) SendMessage(ctx context.Context, db *sqldb.Database, t
 		return "", fmt.Errorf("could not get or create session: %w", err)
 	}
 
+	// If name is collected, append this context to the message
+	if session.NameCollected {
+		message = fmt.Sprintf("(Context: User's name is %s) %s", session.CollectedName, message)
+	}
+
 	if err := sm.openaiCli.AddMessage(ctx, openaicli.CreateMessageInput{
 		ThreadID: session.ThreadID,
 		Message: openaicli.ThreadMessage{
@@ -196,15 +201,25 @@ func (sm *SessionManager) handleFunctionCalling(ctx context.Context, db *sqldb.D
 			}
 
 			// Find session by threadID
+			sm.mu.Lock()
 			var userPhone string
-			sm.mu.RLock()
+			var session *Session
 			for _, sess := range sm.sessions {
 				if sess.ThreadID == threadID {
 					userPhone = sess.UserID // UserID contains the WhatsApp number
+					session = sess
 					break
 				}
 			}
-			sm.mu.RUnlock()
+			sm.mu.Unlock()
+
+			if session == nil {
+				return fmt.Errorf("no session found for thread %s", threadID)
+			}
+
+			// Update session with name information
+			session.NameCollected = true
+			session.CollectedName = args.Name
 
 			if userPhone == "" {
 				return fmt.Errorf("no session found for thread %s", threadID)

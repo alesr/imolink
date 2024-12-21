@@ -6,4 +6,6 @@ type Session struct {
 	ThreadID       string
 	UserID         string
 	LastAccessedAt time.Time
+	NameCollected  bool
+	CollectedName  string
 }
