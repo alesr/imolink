@@ -14,6 +14,13 @@ import (
 	"encore.dev/storage/sqldb"
 )
 
+const (
+	cleanupInterval = 1 * time.Hour
+	sessionTimeout  = 24 * time.Hour
+	roleAssistant   = "assistant"
+	messageTextType = "text"
+)
+
 type openaiCli interface {
 	AddMessage(ctx context.Context, in openaicli.CreateMessageInput) error
 	RunThread(ctx context.Context, threadID, assistantID string) (*openaicli.Run, error)
@@ -26,17 +33,45 @@ type openaiCli interface {
 }
 
 type SessionManager struct {
-	mu        sync.RWMutex
-	sessions  map[string]*Session // key: userID
-	assistant *openaicli.Assistant
-	openaiCli openaiCli
+	mu              sync.RWMutex
+	sessions        map[string]*Session
+	assistant       *openaicli.Assistant
+	openaiCli       openaiCli
+	cleanupInterval time.Duration
+	sessionTimeout  time.Duration
 }
 
 func NewSessionManager(assistant *openaicli.Assistant, openaiCli openaiCli) *SessionManager {
-	return &SessionManager{
-		sessions:  make(map[string]*Session),
-		assistant: assistant,
-		openaiCli: openaiCli,
+	sm := &SessionManager{
+		sessions:        make(map[string]*Session),
+		assistant:       assistant,
+		openaiCli:       openaiCli,
+		cleanupInterval: 1 * time.Hour,
+		sessionTimeout:  24 * time.Hour,
+	}
+
+	go sm.cleanupLoop()
+	return sm
+}
+
+func (sm *SessionManager) cleanupLoop() {
+	ticker := time.NewTicker(sm.cleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sm.cleanup()
+	}
+}
+
+func (sm *SessionManager) cleanup() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	threshold := time.Now().Add(-sm.sessionTimeout)
+	for userID, session := range sm.sessions {
+		if session.LastAccessedAt.Before(threshold) {
+			delete(sm.sessions, userID)
+		}
 	}
 }
 
@@ -110,9 +145,9 @@ COMPLETED:
 	}
 
 	mostRecentMsg := messages.Data[0]
-	if mostRecentMsg.Role == "assistant" && len(mostRecentMsg.Content) > 0 {
+	if mostRecentMsg.Role == roleAssistant && len(mostRecentMsg.Content) > 0 {
 		for _, content := range mostRecentMsg.Content {
-			if content.Type == "text" {
+			if content.Type == messageTextType {
 				finalResponse.WriteString(content.Text.Value)
 				finalResponse.WriteString("\n")
 			}
@@ -205,6 +240,7 @@ func (sm *SessionManager) getOrCreateSession(ctx context.Context, userID string)
 	defer sm.mu.Unlock()
 
 	if session, exists := sm.sessions[userID]; exists {
+		session.LastAccessedAt = time.Now()
 		return session, nil
 	}
 
@@ -214,8 +250,9 @@ func (sm *SessionManager) getOrCreateSession(ctx context.Context, userID string)
 	}
 
 	sess := Session{
-		ThreadID: thread.ID,
-		UserID:   userID,
+		ThreadID:       thread.ID,
+		UserID:         userID,
+		LastAccessedAt: time.Now(),
 	}
 	sm.sessions[userID] = &sess
 

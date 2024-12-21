@@ -3,6 +3,7 @@ package leads
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"encore.app/internal/pkg/idutil"
 	"encore.app/internal/pkg/trello"
@@ -27,7 +28,7 @@ func CreateLead(ctx context.Context, db *sqldb.Database, trelloAPI *trello.Trell
 			INSERT INTO leads (id, name, phone)
 			VALUES ($1, $2, $3)
 		`, id, input.Name, input.Phone); err != nil {
-			fmt.Printf("Error inserting lead: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not insert lead: %v\n", err)
 			return
 		}
 
@@ -36,7 +37,7 @@ func CreateLead(ctx context.Context, db *sqldb.Database, trelloAPI *trello.Trell
 			Description: fmt.Sprintf("Phone: %s", input.Phone),
 			ListID:      newLeadsTrelloLane,
 		}); err != nil {
-			fmt.Printf("Error creating Trello card: %v\n", err)
+			fmt.Fprintf(os.Stderr, "could not create Trello card: %v\n", err)
 			return
 		}
 
