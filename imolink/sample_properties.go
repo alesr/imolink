@@ -255,7 +255,7 @@ func getPhotoAndBlueprint(propType string) (string, string, error) {
 	case "casa":
 		photoFile = "assets/casa1.png"
 	case "apartamento":
-		randNum = rand.Intn(1)
+		randNum = rand.Intn(2)
 		switch randNum {
 		case 0:
 			photoFile = "assets/apartamento1.png"

@@ -5,84 +5,160 @@ import (
 	"embed"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"encore.app/imolink/formatter"
 	"encore.app/internal/pkg/apierror"
-	"encore.app/internal/pkg/httpclient"
-	"encore.app/internal/pkg/openaicli"
 	"encore.app/properties"
 	"encore.dev/beta/errs"
+	"encore.dev/rlog"
+	"encore.dev/storage/sqldb"
+	"github.com/wiselead-ai/httpclient"
+	"github.com/wiselead-ai/openai"
+	"github.com/wiselead-ai/trello"
+	"github.com/wiselead-ai/whatsapp"
 )
 
-const defaultTimeout = time.Minute
+const defaultTimeout = time.Minute * 3
 
 var (
-	Assistant *openaicli.Assistant
+	secrets struct {
+		OpenAIKey    string
+		TrelloAPIKey string
+		TrelloToken  string
+	}
+
+	db = sqldb.NewDatabase("imolink", sqldb.DatabaseConfig{
+		Migrations: "./migrations",
+	})
+
+	// Assistant *openaicli.Assistant
 
 	//go:embed assets/*
 	assetsFS embed.FS
-
-	secrets struct {
-		OpenAIKey string
-	}
 )
 
 type (
 	openAIClient interface {
-		UploadFile(ctx context.Context, data io.Reader, purpose string) (*openaicli.FileUploadResponse, error)
-		CreateVectorStore(ctx context.Context, in *openaicli.CreateVectorStoreInput) (*openaicli.VectorStore, error)
+		UploadFile(ctx context.Context, data io.Reader, purpose string) (*openai.FileUploadResponse, error)
+		CreateVectorStore(ctx context.Context, in *openai.CreateVectorStoreInput) (*openai.VectorStore, error)
 		WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error
-		CreateAssistant(ctx context.Context, cfg *openaicli.CreateAssistantInput) (*openaicli.Assistant, error)
+		CreateAssistant(ctx context.Context, cfg *openai.CreateAssistantInput) (*openai.Assistant, error)
+		ModifyAssistant(ctx context.Context, assistantID string, cfg *openai.ModifyAssistantInput) (*openai.Assistant, error)
 	}
 )
 
 //encore:service
 type Service struct {
-	client openAIClient
-	mu     sync.RWMutex // to protect assistant updates
+	client      openAIClient
+	mu          sync.RWMutex // to protect assistant updates
+	whatsappSvc *whatsapp.Service
+	assistantID string
 }
 
 func initService() (*Service, error) {
-	return &Service{
-		client: openaicli.New(
-			secrets.OpenAIKey,
-			httpclient.New(
-				httpclient.WithTimeout(defaultTimeout),
-			),
-		),
-	}, nil
+	logger := slog.Default().WithGroup("imolink")
+
+	httpCli := httpclient.New(
+		httpclient.WithTimeout(defaultTimeout),
+	)
+
+	openaiCli := openai.New(logger, secrets.OpenAIKey, httpCli)
+
+	s := &Service{client: openaiCli}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	// TODO(alesr): gracefully shutdown at some point
+	_ = cancel
+
+	if err := s.InitializeAssistant(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
+	}
+
+	trelloCli := trello.NewTrelloAPI(httpCli, secrets.TrelloAPIKey, secrets.TrelloToken)
+
+	wsapp, err := whatsapp.New(logger, db, openaiCli, trelloCli, s.assistantID)
+	if err != nil {
+		return nil, fmt.Errorf("could not create whatsapp service: %w", err)
+	}
+	s.whatsappSvc = wsapp
+	return s, nil
 }
 
-//encore:api public method=POST path=/imolink/init-assistant
 func (s *Service) InitializeAssistant(ctx context.Context) error {
-	assistant, err := s.initializeAssistantWithProperties(ctx)
+	assistant, err := s.createAssistantWithProperties(ctx)
 	if err != nil {
 		return apierror.E("failed to initialize assistant", err, errs.Internal)
 	}
-
 	s.mu.Lock()
-	Assistant = assistant
+	s.assistantID = assistant.ID
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*openaicli.Assistant, error) {
-	// We fetch the properties from the db and  upload the data
-	// to openai so that we can use it with the code interpreter tool.
+//encore:api public method=POST path=/imolink/update-assistant
+func (s *Service) UpdateAssistant(ctx context.Context) error {
+	fileID, err := s.uploadPropertiesFile(ctx)
+	if err != nil {
+		return apierror.E("failed to upload properties file", err, errs.Internal)
+	}
 
+	vectorID, err := s.createVectorStore(ctx, fileID)
+	if err != nil {
+		return apierror.E("failed to create vector store", err, errs.Internal)
+	}
+
+	s.mu.RLock()
+	assistantID := s.assistantID
+	s.mu.RUnlock()
+
+	assistant, err := s.client.ModifyAssistant(ctx, assistantID, modifyAssistantCfg(fileID, vectorID))
+	if err != nil {
+		return apierror.E("failed to modify assistant", err, errs.Internal)
+	}
+
+	s.mu.Lock()
+	s.assistantID = assistant.ID
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) createAssistantWithProperties(ctx context.Context) (*openai.Assistant, error) {
+	fileID, err := s.uploadPropertiesFile(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	vectorID, err := s.createVectorStore(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+
+	assist, err := s.client.CreateAssistant(ctx, assistantCfg(fileID, vectorID))
+	if err != nil {
+		return nil, fmt.Errorf("could not create assistant: %w", err)
+	}
+	rlog.Info("Assistant created", "assistantID", assist.ID)
+	return assist, nil
+}
+
+func (s *Service) uploadPropertiesFile(ctx context.Context) (string, error) {
 	props, err := properties.List(ctx, properties.ListInput{})
 	if err != nil {
-		return nil, fmt.Errorf("could not list properties: %w", err)
+		return "", fmt.Errorf("could not list properties: %w", err)
 	}
 
 	if len(props.Properties) == 0 {
-		return nil, fmt.Errorf("no properties available in the database")
+		return "", fmt.Errorf("no properties available in the database")
 	}
 
-	uploadedFile, err := s.client.UploadFile(
+	rlog.Info("Uploading properties data to OpenAI", "properties", len(props.Properties))
+
+	file, err := s.client.UploadFile(
 		ctx,
 		strings.NewReader(
 			formatter.FormatProperties(props.Properties),
@@ -90,58 +166,56 @@ func (s *Service) initializeAssistantWithProperties(ctx context.Context) (*opena
 		"assistants",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("could not upload properties data: %w", err)
+		return "", fmt.Errorf("could not upload properties data: %w", err)
 	}
 
-	// Once we have the file uploaded, we create a vector store.
+	rlog.Info("Properties data uploaded to OpenAI", "fileID", file.ID)
+	return file.ID, nil
+}
 
-	vectorStore, err := s.client.CreateVectorStore(ctx,
-		&openaicli.CreateVectorStoreInput{
+func (s *Service) createVectorStore(ctx context.Context, fileID string) (string, error) {
+	vector, err := s.client.CreateVectorStore(ctx,
+		&openai.CreateVectorStoreInput{
 			Name:    "properties",
-			FileIDs: []string{uploadedFile.ID},
+			FileIDs: []string{fileID},
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("could not create vector store file: %w", err)
+		return "", fmt.Errorf("could not create vector store: %w", err)
 	}
 
-	if vectorStore.Status != "completed" {
+	if vector.Status != "completed" {
 		if err := s.client.WaitForVectorStoreCompletion(
 			ctx,
-			vectorStore.ID,
+			vector.ID,
 			defaultTimeout,
-			10*time.Second,
+			15*time.Second,
 		); err != nil {
-			return nil, fmt.Errorf("could not wait for vector store completion: %w", err)
+			return "", fmt.Errorf("could not wait for vector store completion: %w", err)
 		}
 	}
-
-	assist, err := s.client.CreateAssistant(ctx, assistantCfg(uploadedFile.ID, vectorStore.ID))
-	if err != nil {
-		return nil, fmt.Errorf("could not create assistant: %w", err)
-	}
-	return assist, nil
+	rlog.Info("Vector store created", "vectorStoreID", vector.ID)
+	return vector.ID, nil
 }
-
-func assistantCfg(fileID, vectorStoreID string) *openaicli.CreateAssistantInput {
-	return &openaicli.CreateAssistantInput{
+func assistantCfg(fileID, vectorStoreID string) *openai.CreateAssistantInput {
+	return &openai.CreateAssistantInput{
 		Name:         "ImoLink",
 		Description:  "Assistente especializado em imóveis em Aracaju",
-		Model:        openaicli.AssistantModel,
+		Model:        openai.AssistantModel,
 		Instructions: assistantInstructions,
-		Tools: []openaicli.Tool{
-			{Type: openaicli.ToolTypeFileSearch},
-			{Type: openaicli.ToolTypeCodeInterpreter},
+		Tools: []openai.Tool{
+			{Type: openai.ToolTypeFileSearch},
+			{Type: openai.ToolTypeCodeInterpreter},
 			{
-				Type:     openaicli.ToolTypeFunction,
+				Type:     openai.ToolTypeFunction,
 				Function: leadFunctionDefinition(),
 			},
 		},
-		ToolResources: openaicli.ToolResources{
-			CodeInterpreter: &openaicli.CodeInterpreter{FileIDs: []string{fileID}},
-			FileSearch:      &openaicli.FileSearch{VectorStoreIDs: []string{vectorStoreID}},
+		ToolResources: openai.ToolResources{
+			CodeInterpreter: &openai.CodeInterpreter{FileIDs: []string{fileID}},
+			FileSearch:      &openai.FileSearch{VectorStoreIDs: []string{vectorStoreID}},
 		},
-		Metadata: openaicli.Meta{
+		Metadata: openai.Meta{
 			"type":    "real_estate_assistant",
 			"region":  "Aracaju",
 			"version": "1.0",
@@ -149,8 +223,32 @@ func assistantCfg(fileID, vectorStoreID string) *openaicli.CreateAssistantInput 
 	}
 }
 
-func leadFunctionDefinition() *openaicli.FunctionDefinition {
-	return &openaicli.FunctionDefinition{
+func modifyAssistantCfg(fileID, vectorStoreID string) *openai.ModifyAssistantInput {
+	return &openai.ModifyAssistantInput{
+		Description:  "Assistente especializado em imóveis em Aracaju - Atualizado",
+		Instructions: assistantInstructions,
+		Tools: []openai.Tool{
+			{Type: openai.ToolTypeFileSearch},
+			{Type: openai.ToolTypeCodeInterpreter},
+			{
+				Type:     openai.ToolTypeFunction,
+				Function: leadFunctionDefinition(),
+			},
+		},
+		ToolResources: openai.ToolResources{
+			CodeInterpreter: &openai.CodeInterpreter{FileIDs: []string{fileID}},
+			FileSearch:      &openai.FileSearch{VectorStoreIDs: []string{vectorStoreID}},
+		},
+		Metadata: openai.Meta{
+			"type":    "real_estate_assistant",
+			"region":  "Aracaju",
+			"version": "1.1",
+		},
+	}
+}
+
+func leadFunctionDefinition() *openai.FunctionDefinition {
+	return &openai.FunctionDefinition{
 		Name:        "lead",
 		Description: "Create a new lead in the system. This function MUST be called when the user provides their name.",
 		Parameters: map[string]any{
@@ -164,5 +262,12 @@ func leadFunctionDefinition() *openaicli.FunctionDefinition {
 			},
 			"required": []string{"name"},
 		},
+	}
+}
+
+//encore:api public raw path=/whatsapp/connect
+func (s *Service) WhatsappConnect(w http.ResponseWriter, req *http.Request) {
+	if err := s.whatsappSvc.WhatsappConnect(w); err != nil {
+		apierror.E("could not connect to WhatsApp", err, errs.Internal)
 	}
 }
