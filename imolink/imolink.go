@@ -3,7 +3,9 @@ package imolink
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,6 +42,9 @@ var (
 
 	//go:embed assets/*
 	assetsFS embed.FS
+
+	//go:embed templates/*
+	templatesFS embed.FS
 )
 
 type (
@@ -49,6 +54,7 @@ type (
 		WaitForVectorStoreCompletion(ctx context.Context, vectorStoreID string, timeout, maxDelay time.Duration) error
 		CreateAssistant(ctx context.Context, cfg *openai.CreateAssistantInput) (*openai.Assistant, error)
 		ModifyAssistant(ctx context.Context, assistantID string, cfg *openai.ModifyAssistantInput) (*openai.Assistant, error)
+		GetAssistant(ctx context.Context, assistantID string) (*openai.Assistant, error)
 	}
 )
 
@@ -58,10 +64,20 @@ type Service struct {
 	mu          sync.RWMutex // to protect assistant updates
 	whatsappSvc *whatsapp.Service
 	assistantID string
+	tmpls       *template.Template
 }
 
 func initService() (*Service, error) {
 	logger := slog.Default().WithGroup("imolink")
+
+	funcMap := template.FuncMap{
+		"safeJS": func(i interface{}) template.JS {
+			b, _ := json.Marshal(i)
+			return template.JS(b)
+		},
+	}
+
+	tmpls := template.Must(template.New("dashboard.html").Funcs(funcMap).ParseFS(templatesFS, "templates/dashboard.html"))
 
 	httpCli := httpclient.New(
 		httpclient.WithTimeout(defaultTimeout),
@@ -69,7 +85,10 @@ func initService() (*Service, error) {
 
 	openaiCli := openai.New(logger, secrets.OpenAIKey, httpCli)
 
-	s := &Service{client: openaiCli}
+	s := &Service{
+		client: openaiCli,
+		tmpls:  tmpls,
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	// TODO(alesr): gracefully shutdown at some point
@@ -116,14 +135,17 @@ func (s *Service) UpdateAssistant(ctx context.Context) error {
 	assistantID := s.assistantID
 	s.mu.RUnlock()
 
-	assistant, err := s.client.ModifyAssistant(ctx, assistantID, modifyAssistantCfg(fileID, vectorID))
+	assistant, err := s.client.GetAssistant(ctx, assistantID)
+	if err != nil {
+		return apierror.E("failed to get current assistant", err, errs.Internal)
+	}
+
+	_, err = s.client.ModifyAssistant(ctx, assistantID, modifyAssistantCfg(fileID, vectorID, assistant.Instructions))
 	if err != nil {
 		return apierror.E("failed to modify assistant", err, errs.Internal)
 	}
 
-	s.mu.Lock()
-	s.assistantID = assistant.ID
-	s.mu.Unlock()
+	rlog.Info("Assistant knowledge base updated successfully", "assistantID", assistantID)
 	return nil
 }
 
@@ -197,6 +219,7 @@ func (s *Service) createVectorStore(ctx context.Context, fileID string) (string,
 	rlog.Info("Vector store created", "vectorStoreID", vector.ID)
 	return vector.ID, nil
 }
+
 func assistantCfg(fileID, vectorStoreID string) *openai.CreateAssistantInput {
 	return &openai.CreateAssistantInput{
 		Name:         "ImoLink",
@@ -223,10 +246,10 @@ func assistantCfg(fileID, vectorStoreID string) *openai.CreateAssistantInput {
 	}
 }
 
-func modifyAssistantCfg(fileID, vectorStoreID string) *openai.ModifyAssistantInput {
+func modifyAssistantCfg(fileID, vectorStoreID, currentInstructions string) *openai.ModifyAssistantInput {
 	return &openai.ModifyAssistantInput{
 		Description:  "Assistente especializado em imóveis em Aracaju - Atualizado",
-		Instructions: assistantInstructions,
+		Instructions: currentInstructions,
 		Tools: []openai.Tool{
 			{Type: openai.ToolTypeFileSearch},
 			{Type: openai.ToolTypeCodeInterpreter},
