@@ -25,7 +25,10 @@ import (
 	"github.com/wiselead-ai/whatsapp"
 )
 
-const defaultTimeout = time.Minute * 3
+const (
+	defaultTimeout           = time.Minute * 3
+	defaultAssistTemperature = 0.2
+)
 
 var (
 	secrets struct {
@@ -70,14 +73,16 @@ type Service struct {
 func initService() (*Service, error) {
 	logger := slog.Default().WithGroup("imolink")
 
-	funcMap := template.FuncMap{
-		"safeJS": func(i interface{}) template.JS {
-			b, _ := json.Marshal(i)
-			return template.JS(b)
-		},
-	}
-
-	tmpls := template.Must(template.New("dashboard.html").Funcs(funcMap).ParseFS(templatesFS, "templates/dashboard.html"))
+	tmpls := template.Must(
+		template.New("dashboard.html").
+			Funcs(template.FuncMap{
+				"safeJS": func(i any) template.JS {
+					b, _ := json.Marshal(i)
+					return template.JS(b)
+				},
+			}).
+			ParseFS(templatesFS, "templates/dashboard.html"),
+	)
 
 	httpCli := httpclient.New(
 		httpclient.WithTimeout(defaultTimeout),
@@ -88,6 +93,35 @@ func initService() (*Service, error) {
 	s := &Service{
 		client: openaiCli,
 		tmpls:  tmpls,
+	}
+
+	ctx := context.Background()
+
+	if err := properties.Delete(ctx); err != nil {
+		return nil, fmt.Errorf("could not delete existing properties: %w", err)
+	}
+
+	sampleProps, err := getSampleProperties()
+	if err != nil {
+		return nil, fmt.Errorf("could not get sample properties: %w", err)
+	}
+
+	if err := properties.Create(ctx, &properties.Properties{Properties: sampleProps}); err != nil {
+		return nil, fmt.Errorf("could not create sample property: %w", err)
+	}
+
+	fmt.Printf("Sample properties inserted: %d\n", len(sampleProps))
+
+	time.Sleep(2 * time.Second)
+	// List all properties for debugging
+	props, err := properties.List(ctx, properties.ListInput{})
+	if err != nil {
+		return nil, fmt.Errorf("could not list all properties: %w", err)
+	}
+
+	fmt.Printf("Total properties in database: %d\n", len(props.Properties))
+	for _, prop := range props.Properties {
+		fmt.Printf("Property: %s\n", prop.Name)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -140,8 +174,11 @@ func (s *Service) UpdateAssistant(ctx context.Context) error {
 		return apierror.E("failed to get current assistant", err, errs.Internal)
 	}
 
-	_, err = s.client.ModifyAssistant(ctx, assistantID, modifyAssistantCfg(fileID, vectorID, assistant.Instructions))
-	if err != nil {
+	if _, err := s.client.ModifyAssistant(
+		ctx,
+		assistantID,
+		modifyAssistantCfg(fileID, vectorID, assistant.Instructions),
+	); err != nil {
 		return apierror.E("failed to modify assistant", err, errs.Internal)
 	}
 
@@ -174,10 +211,7 @@ func (s *Service) uploadPropertiesFile(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("could not list properties: %w", err)
 	}
 
-	if len(props.Properties) == 0 {
-		return "", fmt.Errorf("no properties available in the database")
-	}
-
+	rlog.Info("Properties data fetched", "properties", len(props.Properties))
 	rlog.Info("Uploading properties data to OpenAI", "properties", len(props.Properties))
 
 	file, err := s.client.UploadFile(
@@ -221,6 +255,7 @@ func (s *Service) createVectorStore(ctx context.Context, fileID string) (string,
 }
 
 func assistantCfg(fileID, vectorStoreID string) *openai.CreateAssistantInput {
+	temp := defaultAssistTemperature
 	return &openai.CreateAssistantInput{
 		Name:         "ImoLink",
 		Description:  "Assistente especializado em imóveis em Aracaju",
@@ -243,10 +278,12 @@ func assistantCfg(fileID, vectorStoreID string) *openai.CreateAssistantInput {
 			"region":  "Aracaju",
 			"version": "1.0",
 		},
+		Temperature: &temp,
 	}
 }
 
 func modifyAssistantCfg(fileID, vectorStoreID, currentInstructions string) *openai.ModifyAssistantInput {
+	temp := defaultAssistTemperature
 	return &openai.ModifyAssistantInput{
 		Description:  "Assistente especializado em imóveis em Aracaju - Atualizado",
 		Instructions: currentInstructions,
@@ -267,6 +304,7 @@ func modifyAssistantCfg(fileID, vectorStoreID, currentInstructions string) *open
 			"region":  "Aracaju",
 			"version": "1.1",
 		},
+		Temperature: &temp,
 	}
 }
 

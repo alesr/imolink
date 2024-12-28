@@ -8,6 +8,8 @@ import (
 
 	"math/rand"
 
+	"github.com/wiselead-ai/pkg/idutil"
+
 	"encore.app/properties"
 )
 
@@ -193,13 +195,19 @@ func getSampleProperties() ([]*properties.Property, error) {
 
 	props := make([]*properties.Property, 0, len(templates))
 
-	for _, t := range templates[:1] { // Limit to 1 property for now to save money
+	for _, t := range templates {
 		photo, blueprint, err := getPhotoAndBlueprint(t.propType)
 		if err != nil {
 			return nil, fmt.Errorf("could not get photo and blueprint for %s: %w", t.name, err)
 		}
 
+		id, err := idutil.NewID()
+		if err != nil {
+			return nil, fmt.Errorf("could not generate ID: %w", err)
+		}
+
 		prop := &properties.Property{
+			ID:                  id,
 			Name:                t.name,
 			Area:                t.area,
 			NumBedrooms:         t.bedrooms,

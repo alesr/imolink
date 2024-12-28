@@ -7,6 +7,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/wiselead-ai/httpclient v0.0.0-20241226171226-80c1a2e98972
 	github.com/wiselead-ai/openai v0.0.0-20241227092546-cdf0992fd9ad
+	github.com/wiselead-ai/pkg v0.0.0-20241226181225-0c16f3ebb31f
 	github.com/wiselead-ai/trello v0.0.0-20241227102754-44d5ab461dc1
 	github.com/wiselead-ai/whatsapp v0.0.0-20241227105849-ace94eb5f5e8
 )
@@ -27,7 +28,6 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
-	github.com/wiselead-ai/pkg v0.0.0-20241226181225-0c16f3ebb31f // indirect
 	github.com/wiselead-ai/sessions v0.0.0-20241227104027-0ee753a2551d // indirect
 	go.mau.fi/libsignal v0.1.1 // indirect
 	go.mau.fi/util v0.8.3 // indirect
@@ -46,7 +46,7 @@ require (
 replace (
 	github.com/wiselead-ai/httpclient => /Users/alesr/dev/wiselead-ai/httpclient
 	github.com/wiselead-ai/openai => /Users/alesr/dev/wiselead-ai/openai
+	github.com/wiselead-ai/sessions => /Users/alesr/dev/wiselead-ai/sessions
 	github.com/wiselead-ai/trello => /Users/alesr/dev/wiselead-ai/trello
 	github.com/wiselead-ai/whatsapp => /Users/alesr/dev/wiselead-ai/whatsapp
-	github.com/wiselead-ai/sessions => /Users/alesr/dev/wiselead-ai/sessions
 )

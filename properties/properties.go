@@ -45,22 +45,31 @@ func initService() (*Service, error) {
 
 //encore:api public method=POST path=/properties
 func (s *Service) Create(ctx context.Context, in *Properties) error {
+	fmt.Printf("@@@@@@@@Storing %d properties\n", len(in.Properties))
+
 	for _, prop := range in.Properties {
+		fmt.Printf("!!!!!!!!Property: %+#v\n", prop)
 		exists, err := propertyExists(ctx, prop.ID)
 		if err != nil {
 			return fmt.Errorf("could not check property existence: %w", err)
 		}
 
 		if exists {
+			fmt.Println("Property already exists, updating:", prop.Name)
 			if err := updateProperty(ctx, prop); err != nil {
+				fmt.Println("Error updating property:", prop.Name)
 				return fmt.Errorf("could not update property: %w", err)
 			}
 			continue
 		}
+
 		if err := insertProperty(ctx, prop); err != nil {
+			fmt.Println("Error inserting property:", prop.Name)
 			return fmt.Errorf("could not store property: %w", err)
 		}
 	}
+
+	fmt.Println("Properties stored:", len(in.Properties))
 	return nil
 }
 
@@ -163,7 +172,7 @@ func propertyExists(ctx context.Context, id string) (bool, error) {
 }
 
 func updateProperty(ctx context.Context, prop *Property) error {
-	_, err := db.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		UPDATE properties SET
 			name = $1, area = $2, num_bedrooms = $3, num_bathrooms = $4,
 			num_garage_spots = $5, price = $6, street = $7, number = $8,
@@ -177,8 +186,10 @@ func updateProperty(ctx context.Context, prop *Property) error {
 		prop.District, prop.City, prop.State, prop.PropertyType,
 		prop.Reference, prop.Description, prop.YearBuilt,
 		prop.Builder, prop.Features, time.Now(), prop.ID,
-	)
-	return err
+	); err != nil {
+		return fmt.Errorf("could not update property: %w", err)
+	}
+	return nil
 }
 
 func insertProperty(ctx context.Context, prop *Property) error {
@@ -236,7 +247,6 @@ func (s *Service) fetchProperty(ctx context.Context, ref string) (*Property, err
 		}
 		return nil, fmt.Errorf("could not scan property: %w", err)
 	}
-
 	return &p, nil
 }
 
