@@ -21,7 +21,6 @@ import (
 	"encore.dev/storage/sqldb"
 	"github.com/wiselead-ai/httpclient"
 	"github.com/wiselead-ai/openai"
-	"github.com/wiselead-ai/trello"
 	"github.com/wiselead-ai/whatsapp"
 )
 
@@ -110,16 +109,12 @@ func initService() (*Service, error) {
 		return nil, fmt.Errorf("could not create sample property: %w", err)
 	}
 
-	fmt.Printf("Sample properties inserted: %d\n", len(sampleProps))
-
-	time.Sleep(2 * time.Second)
 	// List all properties for debugging
 	props, err := properties.List(ctx, properties.ListInput{})
 	if err != nil {
 		return nil, fmt.Errorf("could not list all properties: %w", err)
 	}
 
-	fmt.Printf("Total properties in database: %d\n", len(props.Properties))
 	for _, prop := range props.Properties {
 		fmt.Printf("Property: %s\n", prop.Name)
 	}
@@ -131,14 +126,6 @@ func initService() (*Service, error) {
 	if err := s.InitializeAssistant(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize assistant: %w", err)
 	}
-
-	trelloCli := trello.NewTrelloAPI(httpCli, secrets.TrelloAPIKey, secrets.TrelloToken)
-
-	wsapp, err := whatsapp.New(logger, db, openaiCli, trelloCli, s.assistantID)
-	if err != nil {
-		return nil, fmt.Errorf("could not create whatsapp service: %w", err)
-	}
-	s.whatsappSvc = wsapp
 	return s, nil
 }
 
@@ -184,6 +171,20 @@ func (s *Service) UpdateAssistant(ctx context.Context) error {
 
 	rlog.Info("Assistant knowledge base updated successfully", "assistantID", assistantID)
 	return nil
+}
+
+type GetAssistantIDResponse struct {
+	AssistantID string `json:"assistant_id"`
+}
+
+//encore:api public method=GET path=/imolink/assistant-id
+func (s *Service) GetAssistantID(ctx context.Context) (*GetAssistantIDResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.assistantID == "" {
+		return nil, apierror.E("assistant ID not initialized", nil, errs.NotFound)
+	}
+	return &GetAssistantIDResponse{AssistantID: s.assistantID}, nil
 }
 
 func (s *Service) createAssistantWithProperties(ctx context.Context) (*openai.Assistant, error) {

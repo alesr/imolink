@@ -6,9 +6,8 @@ require (
 	encore.dev v1.44.6
 	github.com/stretchr/testify v1.10.0
 	github.com/wiselead-ai/httpclient v0.0.0-20241226171226-80c1a2e98972
-	github.com/wiselead-ai/openai v0.0.0-20241227092546-cdf0992fd9ad
+	github.com/wiselead-ai/openai v0.0.0-20241228180829-7db0bc71134a
 	github.com/wiselead-ai/pkg v0.0.0-20241226181225-0c16f3ebb31f
-	github.com/wiselead-ai/trello v0.0.0-20241227102754-44d5ab461dc1
 	github.com/wiselead-ai/whatsapp v0.0.0-20241227105849-ace94eb5f5e8
 )
 
@@ -22,13 +21,17 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.7.2 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jmoiron/sqlx v1.4.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdp/qrterminal/v3 v3.2.0 // indirect
 	github.com/oklog/ulid/v2 v2.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
-	github.com/wiselead-ai/sessions v0.0.0-20241227104027-0ee753a2551d // indirect
+	github.com/wiselead-ai/sessions v0.0.0-20241229102849-557e37d00b27 // indirect
+	github.com/wiselead-ai/trello v0.0.0-20241227102754-44d5ab461dc1 // indirect
 	go.mau.fi/libsignal v0.1.1 // indirect
 	go.mau.fi/util v0.8.3 // indirect
 	go.mau.fi/whatsmeow v0.0.0-20241215104421-68b0856cce22 // indirect
